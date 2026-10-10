@@ -1,0 +1,9 @@
+{
+  "name": "SteadySignal — Complete product design",
+  "id": "795120463827516904",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "main": "code.js",
+  "networkAccess": { "allowedDomains": ["none"] }
+}
