@@ -218,6 +218,25 @@ function App() {
     }
   };
 
+  const saveMetaAccounts = async (accountIds) => {
+    setBusy("meta-accounts");
+    setLoadError("");
+    try {
+      const job = await request("/api/integrations/meta/accounts", {
+        method: "PUT",
+        body: { accountIds }
+      });
+      const complete = await waitFor("/api/jobs", job.id);
+      if (complete.status === "FAILED") throw new Error(complete.errorMessage || "Meta account sync failed.");
+      await reload();
+      setToast("Selected ad accounts and campaigns are up to date.");
+    } catch (error) {
+      setLoadError(error.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
   const checkSite = async (siteId, message = "Page check completed.") => {
     setBusy(`site:${siteId}`);
     setLoadError("");
@@ -365,7 +384,7 @@ function App() {
         {metaSyncIsStale && <div className="alert stale-alert" role="status">Meta campaign data was last synced {formatDate(connection.lastSyncAt)}. Sync now before relying on campaign status.</div>}
         {loadError && <div className="alert error" role="alert"><span>{loadError}</span><button className="alert-close" aria-label="Dismiss error" onClick={() => setLoadError("")}>×</button></div>}
         {route.page === "overview" && <Overview data={data} busy={busy} runQa={runQa} syncMeta={syncMeta} />}
-        {route.page === "campaigns" && <Campaigns data={data} busy={busy} runQa={runQa} syncMeta={syncMeta} />}
+        {route.page === "campaigns" && <Campaigns data={data} busy={busy} runQa={runQa} syncMeta={syncMeta} selectMetaAccounts={saveMetaAccounts} />}
         {route.page === "report" && <QaReport campaignId={route.id} refreshKey={data.campaigns?.find((item) => item.campaign?.id === route.id)?.lastQa?.id || ""} runQa={runQa} busy={busy} />}
         {route.page === "site-watch" && <SiteWatch data={data} busy={busy} checkSite={checkSite} actOnIncident={actOnIncident} createSite={createSite} updateSite={updateSite} archiveSite={archiveSite} />}
         {route.page === "settings" && <Settings data={data} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} />}
@@ -437,19 +456,41 @@ function WatchSummary({ site, incident }) {
   return <a className="watch-item" href="#/site-watch"><span className={`watch-bullet ${incident ? "alert" : "ok"}`} aria-hidden="true" /><span className="watch-item-copy"><strong>{site.name}</strong><small>{incident ? incident.title : site.lastCheckedAt ? `Last checked ${formatDate(site.lastCheckedAt)}` : "Waiting for first check"}</small></span><Status value={incident ? "OPEN" : site.lastCheckedAt ? "PASS" : "UNKNOWN"} label={incident ? "Incident" : site.lastCheckedAt ? "Checked" : "Waiting"} /></a>;
 }
 
-function Campaigns({ data, busy, runQa, syncMeta }) {
+function Campaigns({ data, busy, runQa, syncMeta, selectMetaAccounts }) {
   const { campaigns = [], meta = {} } = data;
   const [filter, setFilter] = useState("All campaigns");
-  const rows = campaigns.filter((item) => {
+  const accounts = meta.accounts || [];
+  const selectedAccounts = accounts.filter((account) => account.selected);
+  const [accountFilter, setAccountFilter] = useState("");
+  useEffect(() => {
+    if (selectedAccounts.length === accounts.length && accounts.length > 1) setAccountFilter("__all__");
+    else setAccountFilter(selectedAccounts[0]?.externalId || "");
+  }, [meta.accounts]);
+  const activeAccount = accounts.find((account) => account.externalId === accountFilter);
+  const accountCampaigns = accountFilter === "__all__"
+    ? campaigns
+    : activeAccount
+      ? campaigns.filter((item) => item.campaign?.adAccountId === activeAccount.id)
+      : [];
+  const rows = accountCampaigns.filter((item) => {
     const phase = campaignPhase(item.campaign);
     if (filter === "Before launch") return phase !== "Live";
     if (filter === "Live") return phase === "Live";
     return true;
   });
-  const nonLive = campaigns.filter((item) => campaignPhase(item.campaign) !== "Live");
+  const nonLive = accountCampaigns.filter((item) => campaignPhase(item.campaign) !== "Live");
   const needsAttention = nonLive.filter((item) => ["FAIL", "WARNING", "STALE"].includes(item.verdict)).length;
+  const changeAccount = (event) => {
+    const value = event.target.value;
+    setAccountFilter(value);
+    selectMetaAccounts(value === "__all__" ? accounts.map((account) => account.externalId) : value ? [value] : []);
+  };
   return <>
-    <PageHeading eyebrow="CAMPAIGN ASSURANCE" title="Campaigns to review." action={<Button onClick={syncMeta} disabled={!meta.connection || busy === "sync"}>{busy === "sync" ? "Syncing…" : "Sync Meta Ads"}</Button>}>Check the offer, destination, and tracking before a campaign goes live. Status and findings come from the connected account.</PageHeading>
+    <PageHeading eyebrow="CAMPAIGN ASSURANCE" title="Campaigns to review." action={<div className="campaign-heading-actions">{accounts.length > 0 && <label className="account-filter-label">Ad account<select value={accountFilter} onChange={changeAccount} disabled={busy === "sync" || busy === "meta-accounts"}>
+      <option value="">Select an ad account</option>
+      {accounts.length > 1 && <option value="__all__">All ad accounts</option>}
+      {accounts.map((account) => <option key={account.id} value={account.externalId}>{account.name} ({account.externalId.replace(/^act_/, "")})</option>)}
+    </select></label>}<Button onClick={syncMeta} disabled={!meta.connection || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : "Sync Meta Ads"}</Button></div>}>Check the offer, destination, and tracking before a campaign goes live. Status and findings come from the selected ad account.</PageHeading>
     <div className="metrics-grid">
       <Metric label="Needs attention" value={needsAttention} note="Latest backend QA verdicts" tone={needsAttention ? "coral" : ""} />
       <Metric label="Before launch" value={nonLive.length} note="Draft, paused, or scheduled Meta campaigns" />
@@ -458,7 +499,7 @@ function Campaigns({ data, busy, runQa, syncMeta }) {
     <section className="panel table-panel">
       <div className="panel-heading"><div><h2>Campaign queue</h2><p>Run a deterministic QA pass or inspect a saved report.</p></div></div>
       <div className="filter-tabs" role="group" aria-label="Filter campaigns">{["All campaigns", "Before launch", "Live"].map((name) => <button key={name} className={`filter-tab ${filter === name ? "selected" : ""}`} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}</button>)}</div>
-      {rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} /> : <Empty title={campaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{campaigns.length ? "Choose another campaign filter." : meta.connection ? "Sync Meta Ads to load campaigns from the connected account." : "Connect Meta Ads to import real campaigns."}</Empty>}
+      {busy === "meta-accounts" ? <div className="center-state inline campaign-loading" role="status" aria-live="polite"><div className="spinner" aria-hidden="true" /><p>Loading campaigns for the selected ad account…</p></div> : rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} /> : <Empty title={accountCampaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{accountCampaigns.length ? "Choose another campaign filter." : meta.connection ? (accounts.length && !accountFilter ? "Choose an ad account from the dropdown to sync and display its campaigns." : "No campaigns were returned for this ad account. Try syncing again or choose another account.") : "Connect Meta Ads to import real campaigns."}</Empty>}
     </section>
   </>;
 }
@@ -471,7 +512,7 @@ function CampaignTable({ items, busy, runQa }) {
       const phase = campaignPhase(campaign);
       const status = item.qaState || "Not checked";
       return <tr key={campaign.id}>
-        <td><div className="table-campaign"><span className="campaign-initial small" aria-hidden="true">{(campaign.name || "C").slice(0, 1).toUpperCase()}</span><span><a className="campaign-title" href={`#/report/${campaign.id}`}>{campaign.name}</a><small>{campaign.objective || "Meta Ads"} · {item.adCount ?? 0} ads</small></span></div></td>
+        <td><div className="table-campaign"><span className="campaign-initial small" aria-hidden="true">{(campaign.name || "C").slice(0, 1).toUpperCase()}</span><span><a className="campaign-title" href={`#/report/${campaign.id}`}>{campaign.name}</a><small>{campaign.objective || "Meta Ads"} · {item.adSetCount ?? 0} ad sets · {item.adCount ?? 0} ads</small></span></div></td>
         <td><Status value={phase === "Live" ? "ACTIVE" : "UNKNOWN"} label={phase} /></td>
         <td>{formatDate(campaign.startAt, { dateStyle: "medium", timeStyle: undefined })}</td>
         <td><Status value={item.verdict || "UNKNOWN"} label={status} /></td>
@@ -479,6 +520,77 @@ function CampaignTable({ items, busy, runQa }) {
       </tr>;
     })}</tbody>
   </table></div>;
+}
+
+function formatMetaBudget(value, currency) {
+  if (value == null || value === "") return "Not set";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return `${value} ${currency || ""}`.trim();
+  try {
+    const formatter = new Intl.NumberFormat(undefined, { style: "currency", currency });
+    const fractionDigits = formatter.resolvedOptions().maximumFractionDigits;
+    return formatter.format(amount / (10 ** fractionDigits));
+  } catch {
+    return `${value} ${currency || ""}`.trim();
+  }
+}
+
+function targetingSummary(targeting = {}) {
+  const geo = targeting.geo_locations || {};
+  const locations = [
+    ...(geo.countries || []),
+    ...(geo.regions || []).map((item) => item.name || item.key).filter(Boolean),
+    ...(geo.cities || []).map((item) => item.name || item.key).filter(Boolean)
+  ];
+  const age = targeting.age_min || targeting.age_max
+    ? `${targeting.age_min ?? "?"}–${targeting.age_max ?? "?"}`
+    : "Default age range";
+  const genders = (targeting.genders || []).map((gender) => ({ 1: "men", 2: "women" })[gender] || String(gender));
+  const platforms = targeting.publisher_platforms || [];
+  return [
+    `Ages ${age}`,
+    locations.length ? `Locations: ${locations.slice(0, 5).join(", ")}${locations.length > 5 ? ` +${locations.length - 5}` : ""}` : "Location targeting unavailable",
+    genders.length ? `Gender: ${genders.join(", ")}` : "All genders",
+    platforms.length ? `Placements: ${platforms.join(", ")}` : "Automatic placements"
+  ].join(" · ");
+}
+
+function AdCreativeCard({ ad }) {
+  const destination = safeExternalUrl(ad.destinationUrl);
+  const rawCallToAction = ad.rawDataJson?.gatekeeper_cta || ad.rawDataJson?.creative?.call_to_action_type;
+  const callToAction = rawCallToAction && rawCallToAction !== "UNKNOWN" ? rawCallToAction : "";
+  return <article className="creative-copy">
+    <div className="ad-creative-heading"><div><div className="creative-type">AD · {ad.name || "Ad creative"}</div><small>{ad.effectiveStatus || ad.status || "Status unavailable"}{callToAction ? ` · CTA: ${callToAction}` : ""}</small></div></div>
+    {ad.headline && <h3>{ad.headline}</h3>}
+    <p>{ad.primaryText || "Primary text not available from Meta."}</p>
+    {ad.description && <p className="muted-copy">{ad.description}</p>}
+    {destination && <a href={destination} target="_blank" rel="noreferrer" className="destination-link">{destination}</a>}
+  </article>;
+}
+
+function AdSetCard({ adSet, ads }) {
+  const budget = adSet.dailyBudget
+    ? `Daily ${formatMetaBudget(adSet.dailyBudget, adSet.currency)}`
+    : adSet.lifetimeBudget
+      ? `Lifetime ${formatMetaBudget(adSet.lifetimeBudget, adSet.currency)}`
+      : "Budget not set at ad set level";
+  const bid = adSet.bidAmount ? ` · Bid ${formatMetaBudget(adSet.bidAmount, adSet.currency)}` : "";
+  const schedule = `${adSet.startAt ? formatDate(adSet.startAt) : "No start date"} – ${adSet.endAt ? formatDate(adSet.endAt) : "No end date"}`;
+  return <article className="adset-review">
+    <div className="adset-heading"><div><div className="creative-type">AD SET</div><h3>{adSet.name || "Unnamed ad set"}</h3></div><Status value={adSet.effectiveStatus || adSet.status || "UNKNOWN"} /></div>
+    <div className="adset-facts">
+      <div><span>Optimization</span><strong>{adSet.optimizationGoal || "Not provided"}</strong></div>
+      <div><span>Budget</span><strong>{budget}</strong></div>
+      <div><span>Billing / bid</span><strong>{adSet.billingEvent || "Not provided"}{adSet.bidStrategy ? ` · ${adSet.bidStrategy}` : ""}{bid}</strong></div>
+      <div><span>Schedule</span><strong>{schedule}</strong></div>
+    </div>
+    <p className="targeting-summary">{targetingSummary(adSet.targetingJson)}</p>
+    <details className="targeting-details"><summary>Full audience and placement settings</summary><pre>{JSON.stringify(adSet.targetingJson || {}, null, 2)}</pre></details>
+    {adSet.promotedObjectJson && Object.keys(adSet.promotedObjectJson).length > 0 && <details className="targeting-details"><summary>Conversion / promoted object</summary><pre>{JSON.stringify(adSet.promotedObjectJson, null, 2)}</pre></details>}
+    <div className="adset-creatives">
+      {ads.length ? ads.map((ad) => <AdCreativeCard key={ad.id} ad={ad} />) : <p className="muted-copy">No ads were returned for this ad set.</p>}
+    </div>
+  </article>;
 }
 
 function QaReport({ campaignId, refreshKey, busy, runQa }) {
@@ -492,22 +604,23 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
     setError("");
     Promise.all([
       request(`/api/campaigns/${campaignId}`),
-      request(`/api/campaigns/${campaignId}/ads`)
-    ]).then(async ([summary, ads]) => {
+      request(`/api/campaigns/${campaignId}/ads`),
+      request(`/api/campaigns/${campaignId}/adsets`)
+    ]).then(async ([summary, ads, adSets]) => {
       const run = summary.lastQa;
       if (!run) {
-        if (active) setDetail({ summary, ads, run: null, results: [], evidence: {} });
+        if (active) setDetail({ summary, ads, adSets, run: null, results: [], evidence: {} });
         return;
       }
       if (["QUEUED", "RUNNING"].includes(run.status)) {
-        if (active) setDetail({ summary, ads, run, results: [], evidence: {} });
+        if (active) setDetail({ summary, ads, adSets, run, results: [], evidence: {} });
         waitFor("/api/qa-runs", run.id)
           .then(() => { if (active) setReportVersion((version) => version + 1); })
           .catch((e) => { if (active) setError(e.message); });
         return;
       }
       const report = await request(`/api/qa-runs/${run.id}/report`);
-      if (active) setDetail({ summary, ads, run, results: report.results, evidence: report.evidence });
+      if (active) setDetail({ summary, ads, adSets, run, results: report.results, evidence: report.evidence });
     }).catch((e) => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [campaignId, refreshKey, reportVersion]);
@@ -516,6 +629,10 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
   if (error) return <div className="alert error" role="alert">{error} <Button onClick={() => window.location.reload()}>Retry</Button></div>;
   if (!detail) return null;
   const campaign = detail.summary.campaign;
+  const adSets = detail.adSets || [];
+  const ads = detail.ads || [];
+  const assignedAdIds = new Set(adSets.flatMap((adSet) => ads.filter((ad) => ad.adSetId === adSet.id).map((ad) => ad.id)));
+  const unassignedAds = ads.filter((ad) => !assignedAdIds.has(ad.id));
   const results = detail.results || [];
   const findings = results.filter((result) => ["FAIL", "WARNING", "UNKNOWN", "STALE"].includes(result.status));
   const sortedResults = [...results].sort((a, b) => severityOrder(a.severity, a.status) - severityOrder(b.severity, b.status));
@@ -529,20 +646,22 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
       <div><div className="eyebrow">LAST CHECKED</div><strong>{formatDate(detail.run?.completedAt || detail.run?.createdAt)}</strong></div>
       <Button kind="primary" disabled={busy === `qa:${campaignId}`} onClick={() => runQa(campaignId)}>{busy === `qa:${campaignId}` ? "Running QA…" : detail.run ? "Run QA again" : "Run QA"}</Button>
     </div>
-    {!detail.run && <Empty title="This campaign has not been checked">Run QA to inspect its current ads, destinations, redirects, offers, and tracking parameters.</Empty>}
     {detail.run && ["QUEUED", "RUNNING"].includes(detail.run.status) && <div className="alert" role="status">A QA run is {detail.run.status.toLowerCase()}. Refresh this report in a moment to see its result.</div>}
     {detail.run?.status === "FAILED" && <div className="alert error" role="alert">{detail.run.errorMessage || "The latest QA run failed."}</div>}
-    {detail.run && <div className="report-columns">
-      <section className="panel creative-panel"><div className="eyebrow">META CAMPAIGN</div><h2>{campaign.name}</h2><p>{campaign.objective || "Objective not provided"} · {detail.summary.adCount} ads</p>
-        {detail.ads.length === 0 ? <Empty title="No accessible ads">The connected Meta account did not return accessible creative data for this campaign.</Empty> : detail.ads.map((ad) => {
-          const destination = safeExternalUrl(ad.destinationUrl);
-          return <article className="creative-copy" key={ad.id}><div className="creative-type">{ad.name || "Ad creative"}</div>{ad.headline && <h3>{ad.headline}</h3>}<p>{ad.primaryText || "Primary text not available from Meta."}</p>{ad.description && <p className="muted-copy">{ad.description}</p>}{destination && <a href={destination} target="_blank" rel="noreferrer" className="destination-link">{destination}</a>}</article>;
-        })}
+    <div className="report-columns">
+      <section className="panel creative-panel"><div className="eyebrow">CAMPAIGN · {campaign.status || "Status unavailable"}</div><h2>{campaign.name}</h2><p>{campaign.objective || "Objective not provided"} · {adSets.length} ad sets · {ads.length} ads</p>
+        <div className="campaign-facts">
+          <div><span>Campaign budget</span><strong>{campaign.dailyBudget ? `Daily ${formatMetaBudget(campaign.dailyBudget, campaign.currency)}` : campaign.lifetimeBudget ? `Lifetime ${formatMetaBudget(campaign.lifetimeBudget, campaign.currency)}` : "Not set at campaign level"}</strong></div>
+          <div><span>Schedule</span><strong>{campaign.startAt ? formatDate(campaign.startAt) : "No start date"} – {campaign.endAt ? formatDate(campaign.endAt) : "No end date"}</strong></div>
+        </div>
+        {adSets.length === 0 ? <Empty title="Ad set details are not available yet">Sync this ad account to import its ad sets and targeting settings.</Empty> : adSets.map((adSet) => <AdSetCard key={adSet.id} adSet={adSet} ads={ads.filter((ad) => ad.adSetId === adSet.id)} />)}
+        {unassignedAds.length > 0 && <section className="unassigned-ads"><h3>Ads without ad set details</h3>{unassignedAds.map((ad) => <AdCreativeCard key={ad.id} ad={ad} />)}</section>}
+        {ads.length === 0 && adSets.length > 0 && <p className="muted-copy">No ads were returned for this campaign.</p>}
       </section>
       <section className="panel finding-panel"><div className="panel-heading"><div><h2>What the backend checked</h2><p>{findings.length} finding{findings.length === 1 ? "" : "s"} need context or action.</p></div></div>
-        {sortedResults.length === 0 ? <Empty title="No checks returned">The latest run has no result records yet.</Empty> : <div className="finding-list">{sortedResults.map((result) => <Finding key={result.id} result={result} evidence={detail.evidence[result.id] || []} />)}</div>}
+        {!detail.run ? <Empty title="No QA run yet">Campaign and ad details are ready to review. Run QA when you want the backend to inspect the current ads and destinations.</Empty> : ["QUEUED", "RUNNING"].includes(detail.run.status) ? <Empty title="QA is running">The ad hierarchy is available while the backend finishes checking the ads and destinations.</Empty> : sortedResults.length === 0 ? <Empty title="No checks returned">The latest run has no result records yet.</Empty> : <div className="finding-list">{sortedResults.map((result) => <Finding key={result.id} result={result} evidence={detail.evidence[result.id] || []} />)}</div>}
       </section>
-    </div>}
+    </div>
   </>;
 }
 
@@ -653,14 +772,18 @@ function IncidentCard({ incident, actOnIncident, busy }) {
 function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
   const { meta, sites, preferences } = data;
   const connected = meta.connection?.status === "CONNECTED";
+  const accounts = meta.accounts || [];
   return <>
     <PageHeading eyebrow="SETTINGS" title="Keep your checks useful." >Manage the Meta connection, monitored destinations, and notification preferences.</PageHeading>
     <section className="panel settings-account"><div className="settings-title"><div><h2>Meta Ads account</h2><p>Read-only campaign access for QA. SteadySignal does not edit, pause, or publish ads.</p></div><span className="meta-letter" aria-hidden="true">M</span></div>
       <div className="settings-connection"><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? meta.connection.status || "Connected" : "Not connected"} />
-        <div className="account-details">{meta.accounts?.length ? meta.accounts.map((account) => <span key={account.id}><strong>{account.name}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>) : <span><strong>{connected ? "Account sync pending" : "No ad account connected"}</strong><small>{connected ? "Sync Meta Ads to load the account." : "Connect using Meta OAuth; tokens stay on the server."}</small></span>}</div>
+        <div className="account-details">{accounts.length ? accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected ? " · Selected" : ""}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>) : <span><strong>{connected ? "Account sync pending" : "No ad account connected"}</strong><small>{connected ? "Sync Meta Ads to discover available accounts." : "Connect using Meta OAuth; tokens stay on the server."}</small></span>}</div>
         {meta.connection?.lastSyncAt && <small>Last sync {formatDate(meta.connection.lastSyncAt)}</small>}
       </div>
-      <div className="settings-actions">{connected ? <><Button onClick={syncMeta} disabled={busy === "sync"}>{busy === "sync" ? "Syncing…" : "Sync now"}</Button><Button onClick={() => window.location.assign("/api/integrations/meta/connect")}>Reconnect</Button><Button className="destructive-text" onClick={disconnectMeta}>Disconnect</Button></> : <Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}</div>
+      <div className="settings-actions">{connected ? <>
+        <Button onClick={syncMeta} disabled={busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : accounts.length ? "Refresh account list" : "Discover ad accounts"}</Button>
+        <Button onClick={() => window.location.assign("/api/integrations/meta/connect")}>Reconnect</Button><Button className="destructive-text" onClick={disconnectMeta}>Disconnect</Button>
+      </> : <Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}</div>
       {meta.connection?.lastError && <div className="alert error">{meta.connection.lastError}</div>}
     </section>
     <div className="settings-grid">
