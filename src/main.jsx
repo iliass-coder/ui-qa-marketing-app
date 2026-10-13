@@ -506,9 +506,8 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
           .catch((e) => { if (active) setError(e.message); });
         return;
       }
-      const results = await request(`/api/qa-runs/${run.id}/results`);
-      const evidenceEntries = await Promise.all(results.map(async (result) => [result.id, await request(`/api/qa-results/${result.id}/evidence`)]));
-      if (active) setDetail({ summary, ads, run, results, evidence: Object.fromEntries(evidenceEntries) });
+      const report = await request(`/api/qa-runs/${run.id}/report`);
+      if (active) setDetail({ summary, ads, run, results: report.results, evidence: report.evidence });
     }).catch((e) => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [campaignId, refreshKey, reportVersion]);
