@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { campaignPhase, formatDate, statusTone, valueText } from "./domain.js";
 import { Icon } from "./icons.jsx";
+import { Brand } from "./Brand.jsx";
+import { LandingPage } from "./LandingPage.jsx";
+import { resolveRoute } from "./routes.js";
 import "./styles.css";
 
 const request = async (path, options = {}) => {
@@ -60,9 +63,7 @@ function safeExternalUrl(value) {
 }
 
 function routeFromHash() {
-  const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  if (parts[0] === "report" && parts[1]) return { page: "report", id: parts[1] };
-  return { page: ["overview", "campaigns", "site-watch", "settings"].includes(parts[0]) ? parts[0] : "overview" };
+  return resolveRoute(window.location.hash, window.location.search);
 }
 
 function navigate(path) {
@@ -96,11 +97,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [authCallback] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    const result = { ssoError: params.get("sso_error"), emailVerified: params.get("email_verified") };
-    if (result.ssoError || result.emailVerified) {
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
-    }
-    return result;
+    return { ssoError: params.get("sso_error"), emailVerified: params.get("email_verified") };
   });
   const [loginError, setLoginError] = useState(() => authCallback.ssoError === "no_account"
     ? "No workspace uses that Google email yet. Switch to Sign up to create one."
@@ -111,7 +108,7 @@ function App() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [emailSignupEnabled, setEmailSignupEnabled] = useState(false);
-  const [authMode, setAuthMode] = useState("signin");
+  const [authMode, setAuthMode] = useState(() => routeFromHash().page === "signup" ? "signup" : "signin");
   const [signupWorkspaceName, setSignupWorkspaceName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [canResendVerification, setCanResendVerification] = useState(false);
@@ -135,6 +132,12 @@ function App() {
     setData({ dashboard, meta, campaigns, incidents, preferences });
     setAuth("signed-in");
   }, []);
+
+  useEffect(() => {
+    if (authCallback.ssoError || authCallback.emailVerified) {
+      window.history.replaceState(null, "", `${window.location.pathname}#/login`);
+    }
+  }, [authCallback]);
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
@@ -162,6 +165,13 @@ function App() {
     if (auth !== "signed-in") return;
     loadApp().catch((error) => setLoadError(error.message));
   }, [auth, loadApp]);
+
+  useEffect(() => {
+    if (route.page === "login" || route.page === "signup") {
+      setAuthMode(route.page === "signup" ? "signup" : "signin");
+      if (auth === "signed-in") navigate("overview");
+    }
+  }, [route.page, auth]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -245,11 +255,13 @@ function App() {
       setUser(null);
       setData(null);
       setAuth("signed-out");
+      navigate("login");
     } catch (error) {
       if (error.status === 401) {
         setUser(null);
         setData(null);
         setAuth("signed-out");
+        navigate("login");
       } else {
         setLoadError(`Could not sign out: ${error.message}`);
       }
@@ -409,7 +421,7 @@ function App() {
 
   if (auth === "loading") return <main className="center-state"><div className="spinner" /><p>Checking your secure session…</p></main>;
   if (auth === "signed-out") {
-    return <main className="login-page"><aside className="login-story"><div className="login-brand"><Brand /></div><div className="login-story-copy"><div className="health-kicker">A CLEARER SIGNAL</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>SteadySignal</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Thoughtful checks. Steadier campaigns.</div></aside><div className="login-form-region"><section className="login-card">
+    return <main className="login-page"><aside className="login-story"><a href="/" className="login-brand" aria-label="SteadySignal home"><Brand /></a><div className="login-story-copy"><div className="health-kicker">A CLEARER SIGNAL</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>SteadySignal</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Thoughtful checks. Steadier campaigns.</div></aside><div className="login-form-region"><section className="login-card">
       <div className="eyebrow">YOUR CAMPAIGN WORKSPACE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Create a workspace for campaigns you can feel confident about." : "Sign in and see how your campaigns are doing."}</p>
       {loadError && <div className="alert error" role="alert">{loadError} Check that the backend is running, then try again.</div>}
       {loginError && <div className="alert error" role="alert">{loginError}</div>}
@@ -430,12 +442,13 @@ function App() {
         <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" value={authEmail} onChange={(event) => { setAuthEmail(event.target.value); setCanResendVerification(false); }} /></label>
         <label>Password<input type="password" name="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} required minLength={authMode === "signup" ? 16 : undefined} maxLength="200" /></label>
         {authMode === "signup" && <label>Confirm password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="16" maxLength="200" /></label>}
-        <Button kind="primary" type="submit" disabled={loginBusy}>{loginBusy ? (authMode === "signup" ? "Creating account…" : "Signing in…") : (authMode === "signup" ? "Create account" : "Sign in")}</Button>
+        <Button kind="primary" type="submit" disabled={loginBusy || (authMode === "signup" && !emailSignupEnabled)}>{loginBusy ? (authMode === "signup" ? "Creating account…" : "Signing in…") : (authMode === "signup" ? "Create account" : "Sign in")}</Button>
       </form><p className="fine-print"><Icon name="shield" size={13} />{authMode === "signup" ? "Use at least 16 characters. We'll verify your email." : "A secure space for your campaign work."}</p>
       {authMode === "signin" && canResendVerification && <Button type="button" className="resend-verification" disabled={loginBusy || !authEmail.trim()} onClick={resendVerification}>Resend verification email</Button>}
-      <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to SteadySignal?"} <button type="button" className="text-button" onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setLoginError(""); }}>{authMode === "signup" ? "Sign in" : "Create an account"}</button></p>
+      <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to SteadySignal?"} <a className="text-button" href={authMode === "signup" ? "#/login" : "#/signup"} onClick={() => setLoginError("")}>{authMode === "signup" ? "Sign in" : "Create an account"}</a></p>
     </section><p className="login-form-foot">SteadySignal · Campaign assurance, made clear.</p></div></main>;
   }
+  if (route.page === "login" || route.page === "signup") return <main className="center-state"><div className="spinner" /><p>Opening your workspace…</p></main>;
   if (!data) return <main className="center-state"><div className="spinner" /><p>Loading workspace data…</p>{loadError && <p role="alert">{loadError} <button className="text-button" onClick={reload}>Try again</button></p>}</main>;
 
   const connection = data.meta?.connection;
@@ -484,10 +497,6 @@ function App() {
       {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast("")} aria-label="Dismiss notification">×</button></div>}
     </main>
   </div>;
-}
-
-function Brand() {
-  return <div className="brand"><span className="brand-mark"><svg viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M5 17h4l3-9 5 15 3-10h5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span className="brand-name">steady<span>signal</span><small>CAMPAIGN ASSURANCE</small></span></div>;
 }
 
 function NavItem({ id, active, icon, label, count }) {
@@ -944,6 +953,9 @@ function severityOrder(severity, status) {
 
 function nextStep(result) {
   const type = String(result.checkType || "").toLowerCase();
+  if (result.status === "UNKNOWN" && /^AI_(NOT_CONFIGURED|UNAVAILABLE|REQUEST_FAILED|INVALID|EMPTY|RESPONSE|REFUSED|MISSING_CHECK|CONFIDENCE)/.test(result.humanMessage || "")) {
+    return "Resolve the AI service error described above, then rerun QA to complete this check.";
+  }
   if (type === "stock_status") return "Confirm the product is in stock and that the landing page reflects its current inventory.";
   if (type === "server_response_time") return "Check hosting, redirects, and server response time; this check does not measure browser rendering or full page load.";
   if (type === "destination_url") return "Add or select a website destination in the Meta creative, sync the campaign again, and rerun QA.";
@@ -1096,4 +1108,21 @@ function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
   </>;
 }
 
-createRoot(document.getElementById("root")).render(<React.StrictMode><App /></React.StrictMode>);
+function WebsiteRouter() {
+  const [route, setRoute] = useState(routeFromHash);
+  useEffect(() => {
+    const updateRoute = () => setRoute(routeFromHash());
+    window.addEventListener("hashchange", updateRoute);
+    return () => window.removeEventListener("hashchange", updateRoute);
+  }, []);
+  useEffect(() => {
+    const titles = { home: "SteadySignal — Keep the promise behind every click", login: "Log in — SteadySignal", signup: "Create your workspace — SteadySignal", overview: "Campaign overview — SteadySignal", campaigns: "Your campaigns — SteadySignal", "site-watch": "Campaign watch — SteadySignal", settings: "Workspace settings — SteadySignal", report: "Campaign QA report — SteadySignal" };
+    document.title = titles[route.page];
+    const anchor = route.page === "home" ? document.getElementById(window.location.hash.slice(1)) : null;
+    if (anchor) anchor.scrollIntoView();
+    else window.scrollTo(0, 0);
+  }, [route.page]);
+  return route.page === "home" ? <LandingPage /> : <App />;
+}
+
+createRoot(document.getElementById("root")).render(<React.StrictMode><WebsiteRouter /></React.StrictMode>);

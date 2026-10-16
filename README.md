@@ -13,6 +13,21 @@ npm run dev
 
 Vite serves the UI at `http://127.0.0.1:5173` and proxies `/api` requests to the existing backend at `http://127.0.0.1:8080`. Start that backend separately. Keep the browser on the same host (`127.0.0.1`) while signing in so the HttpOnly session cookie is reused.
 
+## Public website and workspace
+
+The public landing page at `/` renders without backend requests. Its design and final copy are documented in [the landing-page brief](docs/landing-page-brief.md). The interactive product examples use illustrative data.
+
+| URL | Screen |
+| --- | --- |
+| `/` | Public landing page |
+| `/#/login` | Sign in |
+| `/#/signup` | Create a workspace |
+| `/#/overview` | Authenticated workspace |
+| `/#/campaigns`, `/#/site-watch`, `/#/settings` | Protected product screens |
+| `/#/report/:campaignId` | Protected campaign report |
+
+Signed-in visitors following login or signup links continue to their workspace. Public section anchors, authentication notices, and existing report links are supported. For Google OAuth, set `GOOGLE_LOGIN_SUCCESS_URL` to the frontend's `/#/overview` URL so a successful sign-in returns directly to the workspace. Email verification and sign-in errors are routed to the login screen.
+
 ## Build and test
 
 ```powershell
