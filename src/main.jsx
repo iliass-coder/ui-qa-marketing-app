@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { campaignPhase, formatDate, statusTone, valueText } from "./domain.js";
+import { Icon } from "./icons.jsx";
 import "./styles.css";
 
 const request = async (path, options = {}) => {
@@ -38,33 +39,6 @@ const request = async (path, options = {}) => {
   return response.json();
 };
 
-const actOnIncident = async (incident, action) => {
-  const note = action === "resolve"
-    ? "Resolution requested; verify recovery with a fresh landing page inspection."
-    : action === "mark-intentional"
-      ? "Marked intentional by the user from campaign monitoring."
-      : null;
-  if (["resolve", "mark-intentional"].includes(action) && !note?.trim()) return;
-  setBusy(`incident:${incident.id}`);
-  setLoadError("");
-  try {
-    const result = await request(`/api/incidents/${incident.id}/${action}`, {
-      method: "POST",
-      ...(note ? { body: { note: note.trim() } } : {})
-    });
-    if (action !== "mark-intentional" && result?.id) {
-      const complete = await waitFor("/api/jobs", result.id);
-      if (complete.status === "FAILED") throw new Error(complete.errorMessage || "The incident check failed.");
-    }
-    await reload();
-    setToast(action === "mark-intentional" ? "The change was marked intentional." : "Fresh inspection completed. Incident status reflects the backend's verified result.");
-  } catch (error) {
-    setLoadError(error.message);
-  } finally {
-    setBusy("");
-  }
-};
-
 const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 async function waitFor(path, id) {
@@ -95,25 +69,26 @@ function navigate(path) {
   window.location.hash = `/${path}`;
 }
 
-function Button({ children, kind = "secondary", className = "", ...props }) {
-  return <button className={`button ${kind} ${className}`} {...props}>{children}</button>;
+function Button({ children, icon, kind = "secondary", className = "", ...props }) {
+  return <button className={`button ${kind} ${className}`} {...props}>{icon && <Icon name={icon} size={16} />}{children}</button>;
 }
 
 function Status({ value, label }) {
-  const text = label || value || "Not checked";
+  const raw = label || value || "Not checked";
+  const text = ({ STALE: "Out of date", PASS: "Passed", FAIL: "Needs action", WARNING: "Review needed", UNKNOWN: "Not checked", OPEN: "Open", CONNECTED: "Connected", RESOLVED: "Resolved" })[raw] || metaCodeLabel(raw);
   return <span className={`status ${statusTone(value)}`}><span className="status-dot" aria-hidden="true" />{text}</span>;
 }
 
 function Empty({ title, children, action }) {
-  return <div className="empty-state"><span className="empty-mark" aria-hidden="true">—</span><h3>{title}</h3><p>{children}</p>{action}</div>;
+  return <div className="empty-state"><span className="empty-mark"><Icon name="shield" size={25} /></span><h3>{title}</h3><p>{children}</p>{action}</div>;
 }
 
 function PageHeading({ eyebrow, title, children, action }) {
   return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{children && <p>{children}</p>}</div>{action && <div className="heading-actions">{action}</div>}</div>;
 }
 
-function Metric({ label, value, note, tone = "" }) {
-  return <section className="metric-card"><div className={`metric-value ${tone}`}>{value}</div><div className="metric-label">{label}</div><div className="metric-note">{note}</div></section>;
+function Metric({ label, value, note, tone = "", icon }) {
+  return <section className={`metric-card ${tone}`}><div className="metric-top"><span className="metric-label">{label}</span><Icon name={icon || (tone === "coral" ? "warning" : tone === "green" ? "watch" : "campaigns")} size={19} /></div><div className={`metric-value ${String(value).length > 12 ? "is-date" : ""}`}>{value}</div><div className="metric-note">{note}</div></section>;
 }
 
 function App() {
@@ -394,6 +369,33 @@ function App() {
     }
   };
 
+  const actOnIncident = async (incident, action) => {
+    const note = action === "resolve"
+      ? "Resolution requested; verify recovery with a fresh landing page inspection."
+      : action === "mark-intentional"
+        ? "Marked intentional by the user from campaign monitoring."
+        : null;
+    if (["resolve", "mark-intentional"].includes(action) && !note?.trim()) return;
+    setBusy(`incident:${incident.id}`);
+    setLoadError("");
+    try {
+      const result = await request(`/api/incidents/${incident.id}/${action}`, {
+        method: "POST",
+        ...(note ? { body: { note: note.trim() } } : {})
+      });
+      if (action !== "mark-intentional" && result?.id) {
+        const complete = await waitFor("/api/jobs", result.id);
+        if (complete.status === "FAILED") throw new Error(complete.errorMessage || "The incident check failed.");
+      }
+      await reload();
+      setToast(action === "mark-intentional" ? "The change was marked intentional." : "Fresh inspection completed. Incident status reflects the backend's verified result.");
+    } catch (error) {
+      setLoadError(error.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
   const disconnectMeta = async () => {
     if (!window.confirm("Disconnect the Meta account? Imported history will remain saved.")) return;
     try {
@@ -407,21 +409,19 @@ function App() {
 
   if (auth === "loading") return <main className="center-state"><div className="spinner" /><p>Checking your secure session…</p></main>;
   if (auth === "signed-out") {
-    return <main className="login-page"><div className="login-brand"><Brand /></div><section className="login-card">
-      <div className="eyebrow">WORKSPACE ACCESS</div><h1>{authMode === "signup" ? "Create your workspace." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start checking campaigns with a secure workspace of your own." : "Sign in to review campaigns and monitored pages."}</p>
+    return <main className="login-page"><aside className="login-story"><div className="login-brand"><Brand /></div><div className="login-story-copy"><div className="health-kicker">A CLEARER SIGNAL</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>SteadySignal</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Thoughtful checks. Steadier campaigns.</div></aside><div className="login-form-region"><section className="login-card">
+      <div className="eyebrow">YOUR CAMPAIGN WORKSPACE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Create a workspace for campaigns you can feel confident about." : "Sign in and see how your campaigns are doing."}</p>
       {loadError && <div className="alert error" role="alert">{loadError} Check that the backend is running, then try again.</div>}
       {loginError && <div className="alert error" role="alert">{loginError}</div>}
       {loginNotice && <div className="alert success" role="status">{loginNotice}</div>}
-      {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email sign-up needs SMTP verification enabled. You can still create an account with Google." : "Email sign-up needs SMTP verification enabled. Configure the email settings to create an account."}</div>}
-      <>
+      {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your workspace." : "Email registration is currently unavailable. Contact your workspace administrator."}</div>}
+      {googleEnabled && <>
         <Button type="button" className="google-button" disabled={!googleEnabled || (authMode === "signup" && !signupWorkspaceName.trim())} onClick={startGoogleAuth} title={!googleEnabled ? "Google sign-in is not configured" : undefined}>
           <span className="google-g" aria-hidden="true">G</span>{authMode === "signup" ? "Sign up with Google" : "Sign in with Google"}
         </Button>
-        {!googleEnabled
-          ? <p className="google-signup-hint">Google sign-in is unavailable until the backend has a Google OAuth client ID and secret.</p>
-          : authMode === "signup" && !signupWorkspaceName.trim() && <p className="google-signup-hint">Enter a workspace name below to continue with Google.</p>}
+        {authMode === "signup" && !signupWorkspaceName.trim() && <p className="google-signup-hint">Enter a workspace name below to continue with Google.</p>}
         <div className="login-divider"><span>or continue with email</span></div>
-      </>
+      </>}
       <form key={authMode} onSubmit={login} className="form-stack">
         {authMode === "signup" && <>
           <label>Your name<input type="text" name="name" autoComplete="name" required maxLength="80" /></label>
@@ -431,43 +431,45 @@ function App() {
         <label>Password<input type="password" name="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} required minLength={authMode === "signup" ? 16 : undefined} maxLength="200" /></label>
         {authMode === "signup" && <label>Confirm password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="16" maxLength="200" /></label>}
         <Button kind="primary" type="submit" disabled={loginBusy}>{loginBusy ? (authMode === "signup" ? "Creating account…" : "Signing in…") : (authMode === "signup" ? "Create account" : "Sign in")}</Button>
-      </form><p className="fine-print">{authMode === "signup" ? "Use at least 16 characters. Email sign-up requires verification." : "Your session is protected with an HttpOnly cookie."}</p>
+      </form><p className="fine-print"><Icon name="shield" size={13} />{authMode === "signup" ? "Use at least 16 characters. We'll verify your email." : "A secure space for your campaign work."}</p>
       {authMode === "signin" && canResendVerification && <Button type="button" className="resend-verification" disabled={loginBusy || !authEmail.trim()} onClick={resendVerification}>Resend verification email</Button>}
       <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to SteadySignal?"} <button type="button" className="text-button" onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setLoginError(""); }}>{authMode === "signup" ? "Sign in" : "Create an account"}</button></p>
-    </section></main>;
+    </section><p className="login-form-foot">SteadySignal · Campaign assurance, made clear.</p></div></main>;
   }
   if (!data) return <main className="center-state"><div className="spinner" /><p>Loading workspace data…</p>{loadError && <p role="alert">{loadError} <button className="text-button" onClick={reload}>Try again</button></p>}</main>;
 
   const connection = data.meta?.connection;
-  const account = data.meta?.accounts?.[0];
   const connected = connection?.status === "CONNECTED";
   const lastSync = connection?.lastSyncAt ? new Date(connection.lastSyncAt).getTime() : null;
   const metaSyncIsStale = connected && lastSync && Date.now() - lastSync > 24 * 60 * 60 * 1000;
   const activeNav = route.page === "report" ? "campaigns" : route.page;
 
   return <div className="app-shell">
+    <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
     <aside className="sidebar">
       <a href="#/overview" className="brand-link" aria-label="SteadySignal overview"><Brand /></a>
+      <div className="workspace-card"><span className="workspace-monogram">{(user?.workspace?.name || "W").slice(0, 1).toUpperCase()}</span><span><strong>{user?.workspace?.name || "My workspace"}</strong><small>Campaign workspace</small></span></div>
       <div className="nav-caption">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
-        <NavItem id="overview" active={activeNav === "overview"} icon="◫" label="Overview" />
-        <NavItem id="campaigns" active={activeNav === "campaigns"} icon="↗" label="Campaigns" />
-        <NavItem id="site-watch" active={activeNav === "site-watch"} icon="◉" label="Campaign watch" />
-        <NavItem id="settings" active={activeNav === "settings"} icon="⚙" label="Settings" />
+        <NavItem id="overview" active={activeNav === "overview"} icon="overview" label="Overview" />
+        <NavItem id="campaigns" active={activeNav === "campaigns"} icon="campaigns" label="Campaigns" count={data.campaigns.length} />
+        <NavItem id="site-watch" active={activeNav === "site-watch"} icon="watch" label="Campaign watch" count={data.campaigns.filter((item) => item.monitoringEnabled).length} />
+        <NavItem id="settings" active={activeNav === "settings"} icon="settings" label="Settings" />
       </nav>
       <div className="sidebar-account">
-        <div className="nav-caption">CONNECTED ACCOUNT</div>
-        <div className="account-status"><span className={`signal-dot ${connected ? "online" : ""}`} /><span>{connected ? "Meta Ads" : "Meta not connected"}</span></div>
-        <div className="account-sub">{account?.name || (connected ? "Syncing account…" : "Connect to import campaigns")}</div>
+        <div className="connection-emblem"><Icon name="meta" size={24} /><span className={`signal-dot ${connected ? "online" : ""}`} /></div>
+        <strong>{connected ? "Connected to Meta" : "Connect your Meta account"}</strong>
+        <p>{connected ? `${data.meta?.accounts?.length || 0} ad accounts available` : "Bring your campaigns into one clear view."}</p>
+        <a href="#/settings">Manage connection <Icon name="arrow" size={14} /></a>
       </div>
-      <div className="sidebar-bottom"><span>Campaign assurance</span><small>Read-only campaign access</small></div>
+      <div className="sidebar-bottom"><span className="user-avatar">{(user?.user?.name || "U").slice(0, 1).toUpperCase()}</span><span className="user-copy"><strong>{user?.user?.name || "Workspace member"}</strong><small>Your workspace</small></span><button className="icon-button" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={18} /></button></div>
     </aside>
     <main className="main-area">
       <header className="topbar">
-        <div className="breadcrumbs"><span>{user?.workspace?.name || "Workspace"}</span><span aria-hidden="true">/</span><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
-        <div className="topbar-right"><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta Ads connected" : "Meta disconnected"} /><span className="topbar-user">{user?.user?.name || user?.user?.email}</span><Button className="sign-out-button" onClick={logout} disabled={busy === "logout"}>{busy === "logout" ? "Signing out…" : "Sign out"}</Button></div>
+        <div className="breadcrumbs"><Icon name={activeNav === "site-watch" ? "watch" : activeNav} size={17} /><span>Workspace</span><Icon name="chevron" size={12} /><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
+        <div className="topbar-right"><span className="workspace-date"><Icon name="calendar" size={15} />{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date())}</span><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta connected" : "Meta disconnected"} /><button className="icon-button mobile-signout" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={17} /></button></div>
       </header>
-      <div className="page-content">
+      <div className={`page-content page-${route.page}`} id="main-content" tabIndex="-1">
         {!connected && <div className="alert connection-alert" role="status"><div><strong>Meta account disconnected</strong><span>Connect Meta to import real campaigns and run prelaunch QA.</span></div><Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
         {connection?.lastError && <div className="alert error" role="alert">Meta reports: {connection.lastError}. Reconnect or review the account configuration.</div>}
         {metaSyncIsStale && <div className="alert stale-alert" role="status">Meta campaign data was last synced {formatDate(connection.lastSyncAt)}. Sync now before relying on campaign status.</div>}
@@ -478,17 +480,18 @@ function App() {
         {route.page === "site-watch" && <SiteWatch data={data} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
         {route.page === "settings" && <Settings data={data} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} />}
       </div>
+      <footer className="workspace-footer"><span>SteadySignal <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
       {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast("")} aria-label="Dismiss notification">×</button></div>}
     </main>
   </div>;
 }
 
 function Brand() {
-  return <div className="brand"><span className="brand-mark">S<i /></span><span className="brand-name">steady signal<small>CAMPAIGN ASSURANCE</small></span></div>;
+  return <div className="brand"><span className="brand-mark"><svg viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M5 17h4l3-9 5 15 3-10h5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span className="brand-name">steady<span>signal</span><small>CAMPAIGN ASSURANCE</small></span></div>;
 }
 
-function NavItem({ id, active, icon, label }) {
-  return <a className={`nav-item ${active ? "active" : ""}`} href={`#/${id}`} aria-current={active ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icon}</span><span>{label}</span></a>;
+function NavItem({ id, active, icon, label, count }) {
+  return <a className={`nav-item ${active ? "active" : ""}`} href={`#/${id}`} aria-current={active ? "page" : undefined} title={label}><Icon name={icon} size={19} /><span className="nav-label">{label}</span>{count != null && <span className="nav-count">{count}</span>}</a>;
 }
 
 function Overview({ data, busy, runQa, syncMeta }) {
@@ -502,27 +505,31 @@ function Overview({ data, busy, runQa, syncMeta }) {
   const openIncidents = incidents.filter((incident) => incident.status === "OPEN");
   const recent = [...campaigns].sort((a, b) => new Date(b.campaign?.updatedAt || 0) - new Date(a.campaign?.updatedAt || 0)).slice(0, 4);
   return <>
-    <PageHeading eyebrow="WORKSPACE OVERVIEW" title="A steadier read on your campaigns." action={!meta.connection && <Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}>Catch campaign and landing-page mismatches before launch, then keep watch on pages already live.</PageHeading>
+    <PageHeading eyebrow="THE BIG PICTURE" title="Campaign overview" action={meta.connection ? <Button kind="primary" icon="refresh" onClick={syncMeta} disabled={busy === "sync"}>{busy === "sync" ? "Syncing campaigns…" : "Sync campaigns"}</Button> : <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}>Campaign readiness and landing-page health, in one place.</PageHeading>
     <div className="metrics-grid">
-      <Metric label="Imported campaigns" value={dashboard.importedCampaigns ?? campaigns.length} note={meta.accounts?.length ? `Across ${meta.accounts.length} connected ad account${meta.accounts.length === 1 ? "" : "s"}` : "From your connected Meta account"} />
-      <Metric label="Need a closer look" value={needsReview.length} note={openIncidents.length ? `${openIncidents.length} active campaign incident${openIncidents.length === 1 ? "" : "s"}` : "Prelaunch findings and stale checks"} tone={needsReview.length ? "coral" : ""} />
-      <Metric label="Campaigns monitored" value={`${dashboard.monitoredCampaigns ?? monitored.length}`} note="Current Meta destinations checked every minute" tone="green" />
+      <Metric label="Total campaigns" value={dashboard.importedCampaigns ?? campaigns.length} note={meta.accounts?.some((account) => account.selected) ? `From ${meta.accounts.filter((account) => account.selected).length} selected ad account${meta.accounts.filter((account) => account.selected).length === 1 ? "" : "s"}` : "From your connected Meta account"} />
+      <Metric label="Awaiting review" value={needsReview.length} note="Campaigns that need a fresh QA check" tone="coral" />
+      <Metric label="On campaign watch" value={dashboard.monitoredCampaigns ?? monitored.length} note="Destinations checked every 60 seconds" tone="green" />
     </div>
+    <section className="health-banner" aria-label="Campaign health summary">
+      <div className="health-copy"><div className="health-kicker"><span className="signal-dot" /> WORKSPACE PULSE</div><h2>{openIncidents.length ? `${openIncidents.length} incident${openIncidents.length === 1 ? " needs" : "s need"} a closer look.` : "Keep your next launch in focus."}</h2><p>{openIncidents.length ? "Review changes and availability issues across your monitored landing pages." : "Review your campaign details and landing pages, then keep watch as things change."}</p><a href={openIncidents.length ? "#/site-watch" : "#/campaigns"}>{openIncidents.length ? "Review open incidents" : "Explore your campaigns"}<Icon name="arrow" size={17} /></a></div>
+      <div className="health-coverage"><div className="coverage-ring" style={{ "--coverage": `${campaigns.length ? Math.round(monitored.length / campaigns.length * 100) : 0}%` }}><div><strong>{monitored.length}<span>/{campaigns.length}</span></strong><small>ON WATCH</small></div></div><div className="coverage-copy"><span className="coverage-caption">MONITORING COVERAGE</span><strong>Eyes on your<br />landing pages.</strong><small><span className="signal-dot online" /> Checks every minute</small></div></div>
+    </section>
     <div className="overview-grid">
       <section className="panel campaign-queue">
-        <div className="panel-heading"><div><h2>Before the next dollar goes out</h2><p>Review upcoming campaigns and their latest real QA state.</p></div><Button onClick={() => navigate("campaigns")}>All campaigns</Button></div>
-        {needsReview.length === 0 ? <Empty title={campaigns.length ? "No prelaunch campaign needs attention" : "No imported campaigns yet"}>{campaigns.length ? "Your backend reports no unchecked or non-passing campaigns." : meta.connection ? "Sync Meta Ads to import campaigns visible to the connected account." : "Connect a Meta Ads account to get started."}</Empty> :
-          <div className="campaign-list">{needsReview.slice(0, 5).map((item) => <CampaignRow key={item.campaign.id} item={item} busy={busy} runQa={runQa} />)}</div>}
+        <div className="panel-heading"><div className="section-title"><span className="section-icon"><Icon name="campaigns" /></span><div><h2>Up next for review <span className="count-label">{needsReview.length}</span></h2><p>A fresh check before your next launch.</p></div></div><a className="text-link" href="#/campaigns">View all <Icon name="arrow" size={15} /></a></div>
+        {needsReview.length === 0 ? <Empty title={campaigns.length ? "You're up to date" : "Your campaigns will appear here"}>{campaigns.length ? "No campaigns are waiting for review." : meta.connection ? "Sync Meta Ads to bring your campaigns into this workspace." : "Connect a Meta Ads account to get started."}</Empty> :
+          <div className="campaign-list">{needsReview.slice(0, 4).map((item) => <CampaignRow key={item.campaign.id} item={item} busy={busy} runQa={runQa} />)}</div>}
       </section>
       <section className="panel watch-summary">
-        <div className="panel-heading compact"><div><h2>Campaign watch</h2><p>Checks every minute</p></div><a className="text-link" href="#/site-watch">Open watch</a></div>
+        <div className="panel-heading"><div className="section-title"><span className="section-icon"><Icon name="watch" /></span><div><h2>Always on watch</h2><p>Your landing pages, in focus.</p></div></div><span className={`live-label ${monitored.length ? "" : "is-inactive"}`}><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "LIVE" : "INACTIVE"}</span></div>
         {monitored.length === 0 ? <Empty title="No monitored campaigns">Use Monitor campaign in the Campaigns list to start a watch.</Empty> :
           <div className="watch-list">{monitored.slice(0, 4).map((item) => <CampaignWatchSummary key={item.campaign.id} item={item} incident={openIncidents.find((entry) => entry.campaignId === item.campaign.id)} />)}</div>}
-        <div className="watch-footer"><span>Next scheduled check</span><strong>{formatDate(monitored.map((item) => item.nextMonitoringAt).filter(Boolean).sort()[0])}</strong></div>
+        <div className="watch-footer"><span><Icon name="clock" size={14} /> Every 60 seconds</span><a className="text-link" href="#/site-watch">View monitoring <Icon name="arrow" size={14} /></a></div>
       </section>
     </div>
     <section className="panel recent-panel">
-      <div className="panel-heading"><div><h2>Campaign queue</h2><p>Latest campaigns returned by Meta synchronization.</p></div><Button onClick={syncMeta} disabled={!meta.connection || busy === "sync"}>{busy === "sync" ? "Syncing…" : "Sync Meta Ads"}</Button></div>
+      <div className="panel-heading"><div className="section-title"><span className="section-icon"><Icon name="clock" /></span><div><h2>Recently updated</h2><p>The latest from your connected ad accounts.</p></div></div><a className="text-link" href="#/campaigns">All campaigns <Icon name="arrow" size={15} /></a></div>
       {recent.length === 0 ? <Empty title="No campaign data">When a Meta account is connected and synced, imported campaign status will appear here.</Empty> :
         <CampaignTable items={recent} busy={busy} runQa={runQa} />}
     </section>
@@ -534,25 +541,31 @@ function CampaignRow({ item, busy, runQa }) {
   const needsRun = !item.lastQa || item.qaState === "STALE" || item.qaState === "Not checked";
   return <article className="campaign-row">
     <div className="campaign-initial" aria-hidden="true">{(c.name || "C").slice(0, 1).toUpperCase()}</div>
-    <div className="campaign-row-main"><a className="campaign-title" href={`#/report/${c.id}`}>{c.name}</a><div className="campaign-sub">{c.objective || "Meta campaign"} · {item.adCount ?? 0} ad{item.adCount === 1 ? "" : "s"}</div>
-      <div className="campaign-inline-status"><Status value={item.verdict || item.qaState} label={item.qaState || "Not checked"} /><span>{campaignPhase(c)}</span></div>
+    <div className="campaign-row-main"><a className="campaign-title" href={`#/report/${c.id}`}>{c.name}</a><div className="campaign-sub">{campaignObjective(c.objective)} <span>·</span> {item.adCount ?? 0} ad{item.adCount === 1 ? "" : "s"}</div>
     </div>
-    {needsRun ? <Button kind="primary" onClick={() => runQa(c.id)} disabled={busy === `qa:${c.id}`}>{busy === `qa:${c.id}` ? "Checking…" : "Run QA"}</Button> : <Button onClick={() => navigate(`report/${c.id}`)}>View report</Button>}
+    <Status value={item.verdict || item.qaState} label={item.qaState || "Not checked"} />
+    {needsRun ? <Button className="row-action" onClick={() => runQa(c.id)} disabled={busy === `qa:${c.id}`}>{busy === `qa:${c.id}` ? "Checking…" : "Run check"}<Icon name="arrow" size={14} /></Button> : <Button className="row-action" onClick={() => navigate(`report/${c.id}`)}>View report<Icon name="arrow" size={14} /></Button>}
   </article>;
-}
-
-function WatchSummary({ site, incident }) {
-  return <a className="watch-item" href="#/site-watch"><span className={`watch-bullet ${incident ? "alert" : "ok"}`} aria-hidden="true" /><span className="watch-item-copy"><strong>{site.name}</strong><small>{incident ? incident.title : site.lastCheckedAt ? `Last checked ${formatDate(site.lastCheckedAt)}` : "Waiting for first check"}</small></span><Status value={incident ? "OPEN" : site.lastCheckedAt ? "PASS" : "UNKNOWN"} label={incident ? "Incident" : site.lastCheckedAt ? "Checked" : "Waiting"} /></a>;
 }
 
 function CampaignWatchSummary({ item, incident }) {
   const campaign = item.campaign;
-  return <a className="watch-item" href="#/site-watch"><span className={"watch-bullet " + (incident ? "alert" : "ok")} aria-hidden="true" /><span className="watch-item-copy"><strong>{campaign.name}</strong><small>{incident ? incident.title : item.lastMonitoringAt ? "Last checked " + formatDate(item.lastMonitoringAt) : item.monitoringDestinationCount + " current destination" + (item.monitoringDestinationCount === 1 ? "" : "s")}</small></span><Status value={incident ? "OPEN" : item.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={incident ? "Incident" : item.lastMonitoringAt ? "Monitoring" : "Waiting"} /></a>;
+  return <a className="watch-item" href="#/site-watch"><span className={`watch-state ${incident ? "is-incident" : "is-ok"}`}><Icon name={incident ? "warning" : "globe"} size={18} /></span><span className="watch-item-copy"><strong>{campaign.name}</strong><small>{incident ? "Landing page needs attention" : item.lastMonitoringAt ? "Last check " + formatDate(item.lastMonitoringAt, { dateStyle: undefined, timeStyle: "short" }) : "Waiting for the first check"}</small></span><Icon name="chevron" size={14} /></a>;
+}
+
+function campaignObjective(value) {
+  return ({ OUTCOME_SALES: "Sales", OUTCOME_LEADS: "Leads", OUTCOME_TRAFFIC: "Traffic", OUTCOME_AWARENESS: "Awareness", OUTCOME_ENGAGEMENT: "Engagement", OUTCOME_APP_PROMOTION: "App promotion" })[value] || (value ? metaCodeLabel(value) : "Meta campaign");
+}
+
+function metaCodeLabel(value) {
+  const text = String(value || "");
+  return /^[A-Z][A-Z_]+$/.test(text) ? text.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()) : text;
 }
 
 function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAccounts }) {
   const { campaigns = [], meta = {} } = data;
   const [filter, setFilter] = useState("All campaigns");
+  const [search, setSearch] = useState("");
   const accounts = meta.accounts || [];
   const selectedAccounts = accounts.filter((account) => account.selected);
   const [accountFilter, setAccountFilter] = useState("");
@@ -567,51 +580,52 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
       ? campaigns.filter((item) => item.campaign?.adAccountId === activeAccount.id)
       : [];
   const rows = accountCampaigns.filter((item) => {
+    if (!`${item.campaign?.name || ""} ${campaignObjective(item.campaign?.objective)}`.toLowerCase().includes(search.toLowerCase().trim())) return false;
     const phase = campaignPhase(item.campaign);
     if (filter === "Before launch") return phase !== "Live";
     if (filter === "Live") return phase === "Live";
     return true;
   });
   const nonLive = accountCampaigns.filter((item) => campaignPhase(item.campaign) !== "Live");
-  const needsAttention = nonLive.filter((item) => ["FAIL", "WARNING", "STALE"].includes(item.verdict)).length;
+  const needsAttention = nonLive.filter((item) => !item.lastQa || ["FAIL", "WARNING", "STALE", "UNKNOWN"].includes(item.qaState || item.verdict)).length;
   const changeAccount = (event) => {
     const value = event.target.value;
     setAccountFilter(value);
     selectMetaAccounts(value === "__all__" ? accounts.map((account) => account.externalId) : value ? [value] : []);
   };
   return <>
-    <PageHeading eyebrow="CAMPAIGN ASSURANCE" title="Campaigns to review." action={<div className="campaign-heading-actions">{accounts.length > 0 && <label className="account-filter-label">Ad account<select value={accountFilter} onChange={changeAccount} disabled={busy === "sync" || busy === "meta-accounts"}>
+    <PageHeading eyebrow="CAMPAIGN LIBRARY" title="Your campaigns" action={<div className="campaign-heading-actions">{accounts.length > 0 && <label className="account-filter-label"><span className="sr-only">Ad account</span><select value={accountFilter} onChange={changeAccount} disabled={busy === "sync" || busy === "meta-accounts"}>
       <option value="">Select an ad account</option>
       {accounts.length > 1 && <option value="__all__">All ad accounts</option>}
       {accounts.map((account) => <option key={account.id} value={account.externalId}>{account.name} ({account.externalId.replace(/^act_/, "")})</option>)}
-    </select></label>}<Button onClick={syncMeta} disabled={!meta.connection || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : "Sync Meta Ads"}</Button></div>}>Check the offer, destination, and tracking before a campaign goes live. Status and findings come from the selected ad account.</PageHeading>
+    </select></label>}<Button kind="primary" icon="refresh" onClick={syncMeta} disabled={!meta.connection || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : "Sync campaigns"}</Button></div>}>Every campaign, every destination. All in one clear view.</PageHeading>
     <div className="metrics-grid">
-      <Metric label="Needs attention" value={needsAttention} note="Latest backend QA verdicts" tone={needsAttention ? "coral" : ""} />
-      <Metric label="Before launch" value={nonLive.length} note="Draft, paused, or scheduled Meta campaigns" />
-      <Metric label="Currently live" value={campaigns.length - nonLive.length} note="Active status from Meta" tone="green" />
+      <Metric label="Awaiting review" value={needsAttention} note="Ready for a fresh campaign check" tone="coral" />
+      <Metric label="Before launch" value={nonLive.length} note="Draft, paused, or scheduled campaigns" />
+      <Metric label="Currently live" value={accountCampaigns.length - nonLive.length} note="Active campaigns in this ad account" tone="green" />
     </div>
     <section className="panel table-panel">
-      <div className="panel-heading"><div><h2>Campaign queue</h2><p>Monitor campaign destinations every minute, run QA, or inspect a saved report.</p></div></div>
-      <div className="filter-tabs" role="group" aria-label="Filter campaigns">{["All campaigns", "Before launch", "Live"].map((name) => <button key={name} className={`filter-tab ${filter === name ? "selected" : ""}`} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}</button>)}</div>
+      <div className="table-toolbar"><div className="filter-tabs" role="group" aria-label="Filter campaigns">{["All campaigns", "Before launch", "Live"].map((name) => <button key={name} className={`filter-tab ${filter === name ? "selected" : ""}`} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}<span>{name === "All campaigns" ? accountCampaigns.length : name === "Before launch" ? nonLive.length : accountCampaigns.length - nonLive.length}</span></button>)}</div><label className="search-field"><Icon name="search" size={17} /><span className="sr-only">Search campaigns</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search campaigns…" /></label></div>
       {busy === "meta-accounts" ? <div className="center-state inline campaign-loading" role="status" aria-live="polite"><div className="spinner" aria-hidden="true" /><p>Loading campaigns for the selected ad account…</p></div> : rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} /> : <Empty title={accountCampaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{accountCampaigns.length ? "Choose another campaign filter." : meta.connection ? (accounts.length && !accountFilter ? "Choose an ad account from the dropdown to sync and display its campaigns." : "No campaigns were returned for this ad account. Try syncing again or choose another account.") : "Connect Meta Ads to import real campaigns."}</Empty>}
+      <div className="table-footer"><span>{rows.length} campaign{rows.length === 1 ? "" : "s"}{search && ` matching “${search}”`}</span><span><Icon name="meta" size={15} /> Synced from Meta Ads</span></div>
     </section>
   </>;
 }
 
 function CampaignTable({ items, busy, runQa, monitorCampaign }) {
   return <div className="table-wrap"><table className="data-table">
-    <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th scope="col">Launch</th><th scope="col">Latest QA</th>{monitorCampaign && <th scope="col">Campaign monitoring</th>}<th scope="col"><span className="sr-only">Action</span></th></tr></thead>
+    <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th scope="col">Launch date</th><th scope="col">Latest check</th>{monitorCampaign && <th scope="col">Monitoring</th>}<th scope="col"><span className="sr-only">Action</span></th></tr></thead>
     <tbody>{items.map((item) => {
       const campaign = item.campaign;
       const phase = campaignPhase(campaign);
       const status = item.qaState || "Not checked";
       return <tr key={campaign.id}>
-        <td><div className="table-campaign"><span className="campaign-initial small" aria-hidden="true">{(campaign.name || "C").slice(0, 1).toUpperCase()}</span><span><a className="campaign-title" href={`#/report/${campaign.id}`}>{campaign.name}</a><small>{campaign.objective || "Meta Ads"} · {item.adSetCount ?? 0} ad sets · {item.adCount ?? 0} ads</small></span></div></td>
+        <td><div className="table-campaign"><span className="campaign-initial small" aria-hidden="true">{(campaign.name || "C").slice(0, 1).toUpperCase()}</span><span><a className="campaign-title" href={`#/report/${campaign.id}`}>{campaign.name}</a><small>{campaignObjective(campaign.objective)} · {item.adCount ?? 0} ad{item.adCount === 1 ? "" : "s"}</small></span></div></td>
         <td><Status value={phase === "Live" ? "ACTIVE" : "UNKNOWN"} label={phase} /></td>
         <td>{formatDate(campaign.startAt, { dateStyle: "medium", timeStyle: undefined })}</td>
         <td><Status value={item.verdict || "UNKNOWN"} label={status} /></td>
-        {monitorCampaign && <td><Button disabled={busy === "monitor:" + campaign.id || (!item.monitoringEnabled && !item.monitoringAvailable)} onClick={() => monitorCampaign(campaign.id, !item.monitoringEnabled)} title={!item.monitoringEnabled && !item.monitoringAvailable ? "No ad destination is currently available. Sync this campaign from Meta first." : undefined}>{busy === "monitor:" + campaign.id ? "Updating..." : item.monitoringEnabled ? "Pause watch" : item.monitoringAvailable ? "Monitor campaign (" + item.monitoringDestinationCount + " destination" + (item.monitoringDestinationCount === 1 ? "" : "s") + ")" : "No destination"}</Button></td>}
-        <td className="action-cell">{item.lastQa && !["STALE", "Not checked"].includes(status) ? <Button onClick={() => navigate(`report/${campaign.id}`)}>View report</Button> : <Button kind="primary" disabled={busy === `qa:${campaign.id}`} onClick={() => runQa(campaign.id)}>{busy === `qa:${campaign.id}` ? "Checking…" : "Run QA"}</Button>}</td>
+        {monitorCampaign && <td><Button icon="watch" className={`monitor-button ${item.monitoringEnabled ? "is-on" : ""}`} disabled={busy === "monitor:" + campaign.id || (!item.monitoringEnabled && !item.monitoringAvailable)} onClick={() => monitorCampaign(campaign.id, !item.monitoringEnabled)} title={!item.monitoringEnabled && !item.monitoringAvailable ? "No ad destination is currently available. Sync this campaign from Meta first." : `${item.monitoringDestinationCount || 0} landing page destinations`}>{busy === "monitor:" + campaign.id ? "Updating…" : item.monitoringEnabled ? "Pause watch" : item.monitoringAvailable ? "Start watch" : "No destination"}</Button></td>}
+        <td className="action-cell">{item.lastQa && !["STALE", "Not checked"].includes(status) ? <Button className="row-action" onClick={() => navigate(`report/${campaign.id}`)}>View report<Icon name="arrow" size={14} /></Button> : <Button className="row-action" disabled={busy === `qa:${campaign.id}`} onClick={() => runQa(campaign.id)}>{busy === `qa:${campaign.id}` ? "Checking…" : "Run check"}<Icon name="arrow" size={14} /></Button>}</td>
       </tr>;
     })}</tbody>
   </table></div>;
@@ -711,9 +725,9 @@ function AdSetCard({ adSet, ads }) {
   return <article className="adset-review">
     <div className="adset-heading"><div><div className="creative-type">AD SET</div><h3>{adSet.name || "Unnamed ad set"}</h3></div><Status value={adSet.effectiveStatus || adSet.status || "UNKNOWN"} /></div>
     <div className="adset-facts">
-      <div><span>Optimization</span><strong>{adSet.optimizationGoal || "Not provided"}</strong></div>
+      <div><span>Optimization</span><strong>{metaCodeLabel(adSet.optimizationGoal) || "Not provided"}</strong></div>
       <div><span>Budget</span><strong>{budget}</strong></div>
-      <div><span>Billing / bid</span><strong>{adSet.billingEvent || "Not provided"}{adSet.bidStrategy ? ` · ${adSet.bidStrategy}` : ""}{bid}</strong></div>
+      <div><span>Billing / bid</span><strong>{metaCodeLabel(adSet.billingEvent) || "Not provided"}{adSet.bidStrategy ? ` · ${metaCodeLabel(adSet.bidStrategy)}` : ""}{bid}</strong></div>
       <div><span>Schedule</span><strong>{schedule}</strong></div>
     </div>
     <div className="audience-details" aria-label="Audience and delivery settings">{audience.map((item) => <div key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}</div>
@@ -787,8 +801,8 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
     {detail.run && ["QUEUED", "RUNNING"].includes(detail.run.status) && <div className="alert" role="status">A QA run is {detail.run.status.toLowerCase()}. Refresh this report in a moment to see its result.</div>}
     {detail.run?.status === "FAILED" && <div className="alert error" role="alert">{detail.run.errorMessage || "The latest QA run failed."}</div>}
     <div className="report-columns">
-      <section className="panel creative-panel"><div className="campaign-info-heading"><div><div className="eyebrow">CAMPAIGN OVERVIEW</div><h2>{campaign.name}</h2><p>{campaign.objective || "Objective not provided"}</p></div><Status value={campaignPhase(campaign) === "Live" ? "ACTIVE" : campaign.status || "UNKNOWN"} label={campaignPhase(campaign)} /></div>
-        <div className="campaign-count-strip"><span>{adSets.length} ad sets</span><span>{ads.length} ads</span><span>Meta status: {humanizeLabel(campaign.status || "Not reported")}</span></div>
+      <section className="panel creative-panel"><div className="campaign-info-heading"><div><div className="eyebrow">CAMPAIGN OVERVIEW</div><h2>{campaign.name}</h2><p>{campaignObjective(campaign.objective)}</p></div><Status value={campaignPhase(campaign) === "Live" ? "ACTIVE" : campaign.status || "UNKNOWN"} label={campaignPhase(campaign)} /></div>
+        <div className="campaign-count-strip"><span>{adSets.length} ad set{adSets.length === 1 ? "" : "s"}</span><span>{ads.length} ad{ads.length === 1 ? "" : "s"}</span></div>
         <div className="campaign-facts">
           <div><span>Campaign budget</span><strong>{campaign.dailyBudget ? `${formatMetaBudget(campaign.dailyBudget, campaign.currency)} per day` : campaign.lifetimeBudget ? `${formatMetaBudget(campaign.lifetimeBudget, campaign.currency)} lifetime` : "Set across ad sets"}</strong></div>
           <div><span>Campaign schedule</span><strong>{campaign.startAt ? formatDate(campaign.startAt, { dateStyle: "medium", timeStyle: undefined }) : "No start date"} – {campaign.endAt ? formatDate(campaign.endAt, { dateStyle: "medium", timeStyle: undefined }) : "No end date"}</strong></div>
@@ -798,7 +812,7 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
         {ads.length === 0 && adSets.length > 0 && <p className="muted-copy">No ads were returned for this campaign.</p>}
       </section>
       <section className="panel finding-panel"><div className="panel-heading"><div><h2>Launch checklist</h2><p>{actionCount ? `${actionCount} item${actionCount === 1 ? "" : "s"} to address` : "No blocking issues found"}{reviewCount ? ` · ${reviewCount} need your judgment` : ""}</p></div><small className="report-check-count">{coreResults.length} checks</small></div>
-        {!detail.run ? <Empty title="No QA run yet">Campaign and ad details are ready to review. Run QA when you want the backend to inspect the current ads and destinations.</Empty> : ["QUEUED", "RUNNING"].includes(detail.run.status) ? <Empty title="QA is running">The ad hierarchy is available while the backend finishes checking the ads and destinations.</Empty> : coreResults.length === 0 ? <Empty title="No core checks returned">The latest run has no results for the selected launch checks.</Empty> : <div className="finding-list">{coreResults.map((result) => <Finding key={result.id} result={result} evidence={detail.evidence[result.id] || []} />)}</div>}
+        {!detail.run ? <Empty title="Ready for your first check">Run a campaign check to review your ads and landing-page destinations.</Empty> : ["QUEUED", "RUNNING"].includes(detail.run.status) ? <Empty title="Your check is running">You can review the campaign details while we inspect its ads and destinations.</Empty> : coreResults.length === 0 ? <Empty title="No checks to display">The latest run has no results for the selected launch checks.</Empty> : <div className="finding-list">{coreResults.map((result) => <Finding key={result.id} result={result} evidence={detail.evidence[result.id] || []} />)}</div>}
       </section>
     </div>
   </>;
@@ -1009,7 +1023,7 @@ function SiteWatch({ data, busy, checkCampaign, monitorCampaign, actOnIncident }
   }, [selected?.campaign.id, selected?.lastMonitoringAt, campaigns.length]);
   const activeIncidents = incidents.filter((incident) => incident.status === "OPEN");
   return <>
-    <PageHeading eyebrow="CAMPAIGN WATCH" title="Follow the campaign, wherever it sends people.">Each check refreshes this campaign from Meta, then inspects the destinations currently used by its ads.</PageHeading>
+    <PageHeading eyebrow="CONTINUOUS MONITORING" title="Always on watch" action={<span className="monitoring-label"><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "Checks every 60 seconds" : "No active watches"}</span>}>Keep a close eye on the pages your campaigns send people to.</PageHeading>
     <div className="metrics-grid">
       <Metric label="Campaigns monitored" value={data.dashboard?.monitoredCampaigns ?? monitored.length} note="The campaign is refreshed before every check" tone="green" />
       <Metric label="Active incidents" value={activeIncidents.length} note="Changes or availability issues needing review" tone={activeIncidents.length ? "coral" : ""} />
@@ -1021,16 +1035,16 @@ function SiteWatch({ data, busy, checkCampaign, monitorCampaign, actOnIncident }
           const campaign = item.campaign;
           const open = incidents.find((incident) => incident.campaignId === campaign.id && incident.status === "OPEN");
           return <button key={campaign.id} className={"site-option " + (selectedId === campaign.id ? "selected" : "")} onClick={() => setSelectedId(campaign.id)} aria-pressed={selectedId === campaign.id}>
-            <span className={"watch-bullet " + (open ? "alert" : "ok")} aria-hidden="true" />
-            <span className="site-option-main"><strong>{campaign.name}</strong><small>{campaign.objective || "Meta campaign"} | {item.monitoringDestinationCount} current destination{item.monitoringDestinationCount === 1 ? "" : "s"}</small></span><span className="site-option-state">{open ? "Incident" : "Monitoring"}</span>
+            <span className={`watch-state ${open ? "is-incident" : "is-ok"}`}><Icon name={open ? "warning" : "globe"} size={18} /></span>
+            <span className="site-option-main"><strong>{campaign.name}</strong><small>{campaignObjective(campaign.objective)} · {item.monitoringDestinationCount} destination{item.monitoringDestinationCount === 1 ? "" : "s"}</small></span><Icon name="chevron" size={14} />
           </button>;
         })}</div>}
       </section>
       <section className="panel site-detail-panel">
         {!selected ? <Empty title="Choose a campaign">Select a monitored campaign to inspect its latest Meta destinations and check history.</Empty> : <>
-          <div className="site-detail-head"><div><div className="eyebrow">MONITORED CAMPAIGN</div><h2>{selected.campaign.name}</h2><p>{selected.campaign.objective || "Meta campaign"} | Checks every minute</p></div><Status value={selected.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={selected.lastMonitoringAt ? "Watch active" : "Waiting for first check"} /></div>
+          <div className="site-detail-head"><div><div className="eyebrow">MONITORED CAMPAIGN</div><h2>{selected.campaign.name}</h2><p>{campaignObjective(selected.campaign.objective)} · Checked every minute</p></div><Status value={selected.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={selected.lastMonitoringAt ? "Watch active" : "Waiting for first check"} /></div>
           <div className="site-timing"><div><span>Last check</span><strong>{formatDate(selected.lastMonitoringAt)}</strong></div><div><span>Next scheduled</span><strong>{formatDate(selected.nextMonitoringAt)}</strong></div><div><span>Current destinations</span><strong>{selected.monitoringDestinationCount ?? 0}</strong></div></div>
-          <div className="site-actions"><Button kind="primary" disabled={busy === "campaign-monitor:" + selected.campaign.id} onClick={() => checkCampaign(selected.campaign.id)}>{busy === "campaign-monitor:" + selected.campaign.id ? "Refreshing campaign..." : "Refresh from Meta and check"}</Button><Button disabled={busy === "monitor:" + selected.campaign.id} onClick={() => monitorCampaign(selected.campaign.id, false)}>Pause campaign watch</Button></div>
+          <div className="site-actions"><Button kind="primary" icon="refresh" disabled={busy === "campaign-monitor:" + selected.campaign.id} onClick={() => checkCampaign(selected.campaign.id)}>{busy === "campaign-monitor:" + selected.campaign.id ? "Checking campaign…" : "Check now"}</Button><Button icon="watch" disabled={busy === "monitor:" + selected.campaign.id} onClick={() => monitorCampaign(selected.campaign.id, false)}>Pause watch</Button></div>
           {detailError && <div className="alert error" role="alert">{detailError}</div>}
           {details && <><section className="history-section"><div className="section-heading"><h3>Current ad destinations</h3><span>Refreshed from Meta for each check</span></div>
             {details.destinations.length === 0 ? <Empty title="No current ad destinations">The latest Meta campaign data contains no destination URL to inspect.</Empty> : <div className="history-list">{details.destinations.map((destination) => {
@@ -1057,21 +1071,20 @@ function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
   const canPauseMetaCampaigns = meta.connection?.scopes?.includes("ads_management") === true;
   const accounts = meta.accounts || [];
   return <>
-    <PageHeading eyebrow="SETTINGS" title="Keep your checks useful." >Manage the Meta connection, campaign monitoring, and notification preferences.</PageHeading>
-    <section className="panel settings-account"><div className="settings-title"><div><h2>Meta Ads account</h2><p>Read-only campaign access for QA. SteadySignal never edits or publishes ads; automatic pausing is optional.</p></div><span className="meta-letter" aria-hidden="true">M</span></div>
-      <div className="settings-connection"><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? meta.connection.status || "Connected" : "Not connected"} />
-        <div className="account-details">{accounts.length ? accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected ? " · Selected" : ""}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>) : <span><strong>{connected ? "Account sync pending" : "No ad account connected"}</strong><small>{connected ? "Sync Meta Ads to discover available accounts." : "Connect using Meta OAuth; tokens stay on the server."}</small></span>}</div>
-        {meta.connection?.lastSyncAt && <small>Last sync {formatDate(meta.connection.lastSyncAt)}</small>}
-      </div>
+    <PageHeading eyebrow="MAKE IT YOURS" title="Workspace settings" >Your connections, monitoring, and notifications. Just the way you need them.</PageHeading>
+    <section className="panel settings-account"><div className="settings-title"><div className="section-title"><span className="integration-icon"><Icon name="meta" size={28} /></span><div><h2>Meta Ads</h2><p>Your campaign source, connected securely.</p></div></div><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Connected" : "Not connected"} /></div>
+      <div className="settings-connection"><div><strong>{accounts.length} ad account{accounts.length === 1 ? "" : "s"} available</strong><p>{accounts.filter((account) => account.selected).length} selected for campaign sync</p></div>{meta.connection?.lastSyncAt && <small><Icon name="clock" size={14} /> Last synced {formatDate(meta.connection.lastSyncAt)}</small>}</div>
+      {accounts.length > 0 && <details className="connected-accounts"><summary>View connected ad accounts <Icon name="chevron" size={15} /></summary><div className="account-details">{accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected && <span className="account-selected"><Icon name="check" size={12} /> Selected</span>}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>)}</div></details>}
+      {!accounts.length && <p className="muted-copy">{connected ? "Sync your account to discover available campaigns." : "Connect Meta Ads to bring your campaigns into SteadySignal."}</p>}
       <div className="settings-actions">{connected ? <>
-        <Button onClick={syncMeta} disabled={busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : accounts.length ? "Refresh account list" : "Discover ad accounts"}</Button>
-        <Button onClick={() => window.location.assign("/api/integrations/meta/connect")}>Reconnect</Button><Button className="destructive-text" onClick={disconnectMeta}>Disconnect</Button>
-      </> : <Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}</div>
+        <Button icon="refresh" onClick={syncMeta} disabled={busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : accounts.length ? "Refresh accounts" : "Discover ad accounts"}</Button>
+        <Button icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Reconnect</Button><Button className="destructive-text" onClick={disconnectMeta}>Disconnect</Button>
+      </> : <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}</div>
       {meta.connection?.lastError && <div className="alert error">{meta.connection.lastError}</div>}
     </section>
     <div className="settings-grid">
-      <section className="panel settings-monitoring"><h2>Campaign monitoring</h2><p>Each scheduled check refreshes campaign and ad destinations from Meta before inspecting the pages.</p><div className="setting-line"><span>Check interval</span><strong>Every minute</strong></div><div className="setting-line"><span>Campaigns monitored</span><strong>{campaigns.filter((item) => item.monitoringEnabled).length} active</strong></div><a className="text-link" href="#/site-watch">Manage campaign watches</a></section>
-      <form className="panel settings-notifications" onSubmit={savePreferences}><h2>Notifications</h2><p>Emails are queued only when SMTP delivery is enabled by the workspace backend.</p>
+      <section className="panel settings-monitoring"><span className="settings-section-icon"><Icon name="watch" size={22} /></span><h2>Campaign monitoring</h2><p>Fresh campaign details and destination checks, automatically.</p><div className="setting-line"><span>Check interval</span><strong>Every minute</strong></div><div className="setting-line"><span>Campaigns on watch</span><strong>{campaigns.filter((item) => item.monitoringEnabled).length} active</strong></div><a className="text-link" href="#/site-watch">Manage campaign watches <Icon name="arrow" size={15} /></a></section>
+      <form className="panel settings-notifications" onSubmit={savePreferences}><span className="settings-section-icon"><Icon name="mail" size={22} /></span><h2>Stay in the loop</h2><p>Choose which campaign updates reach your inbox.</p>
         <label className="form-label">Notification email<input type="email" name="email" required maxLength="254" defaultValue={preferences.email} /></label>
         <label className="toggle-row"><span><strong>New incidents</strong><small>When a monitored page changes or fails.</small></span><input type="checkbox" name="incidentAlertsEnabled" defaultChecked={preferences.incidentAlertsEnabled} aria-label="Email me about new incidents" /></label>
         <label className="toggle-row"><span><strong>Recovery updates</strong><small>When a new check verifies recovery.</small></span><input type="checkbox" name="recoveryAlertsEnabled" defaultChecked={preferences.recoveryAlertsEnabled} aria-label="Email me about recovery updates" /></label>
@@ -1079,7 +1092,7 @@ function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
         <Button kind="primary" type="submit" disabled={busy === "preferences"}>{busy === "preferences" ? "Saving…" : "Save preferences"}</Button>
       </form>
     </div>
-    <p className="security-note">Meta tokens remain encrypted on the server. The frontend uses an HttpOnly session cookie and never reads credentials or tokens.</p>
+    <p className="security-note"><Icon name="shield" size={15} /> Your Meta connection is encrypted. SteadySignal never publishes ads.</p>
   </>;
 }
 
