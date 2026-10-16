@@ -765,7 +765,7 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
   const assignedAdIds = new Set(adSets.flatMap((adSet) => ads.filter((ad) => ad.adSetId === adSet.id).map((ad) => ad.id)));
   const unassignedAds = ads.filter((ad) => !assignedAdIds.has(ad.id));
   const results = detail.results || [];
-  const reportTypes = new Set(["budget", "availability", "product_consistency", "market_language", "offer_eligibility", "service_region", "copy_quality"]);
+  const reportTypes = new Set(["budget", "destination_url", "availability", "stock_status", "server_response_time", "product_consistency", "market_language", "offer_eligibility", "promotion_consistency", "service_region", "copy_quality"]);
   const coreResults = results
     .filter((result) => reportTypes.has(result.checkType))
     .sort((a, b) => severityOrder(a.severity, a.status) - severityOrder(b.severity, b.status));
@@ -827,9 +827,23 @@ function parseReportValue(raw) {
 
 function reportValueLines(result, side) {
   const value = parseReportValue(side === "expected" ? result.expectedJson : result.observedJson);
+  const type = result.checkType;
+  if (type === "destination_url") {
+    if (side === "expected") return ["An HTTP(S) destination URL should be available from the ad creative."];
+    return value ? [`Destination URL: ${String(value)}`] : ["No destination URL found in the available Meta creative fields."];
+  }
+  if (type === "stock_status") {
+    if (side === "expected") return ["The landing page should not show an out-of-stock notice."];
+    return value?.detectedText ? [`Detected notice: ${value.detectedText}`] : ["No recognized out-of-stock phrase found in captured page text."];
+  }
+  if (type === "server_response_time") {
+    if (side === "expected") return [`Server response should be within ${Number(value?.thresholdMs ?? 3000).toLocaleString()} ms.`];
+    return value?.responseTimeMs != null
+      ? [`Measured server response: ${Number(value.responseTimeMs).toLocaleString()} ms`]
+      : ["Server response time could not be measured."];
+  }
   if (value == null || value === "") return ["No detail recorded"];
   if (typeof value !== "object") return [String(value)];
-  const type = result.checkType;
   if (type === "budget" && side === "observed") {
     const lines = [];
     const total = Number(value.knownDailyTotalUsd);
@@ -852,6 +866,27 @@ function reportValueLines(result, side) {
     if (value.visibleTextLength != null) lines.push(`${Number(value.visibleTextLength).toLocaleString()} characters of page text captured`);
     if (value.error) lines.push(`Page check detail: ${value.error}`);
     if (lines.length) return lines;
+  }
+  if (type === "promotion_consistency") {
+    const offers = side === "expected" ? value.adOffer : value.landingPageOffer;
+    const evidence = side === "expected" ? value.adEvidence : value.pageEvidence;
+    const label = side === "expected" ? "Ad offer" : "Landing-page offer";
+    const lines = [];
+    if (Array.isArray(offers) && offers.length) {
+      lines.push(`${label}: ${offers.map((offer) => {
+        if (offer.type === "PERCENT_OFF") return `${offer.value}% off`;
+        if (offer.type === "AMOUNT_OFF") {
+          const [currency, amount] = String(offer.value).split(":");
+          const symbol = ({ USD: "$", EUR: "€", GBP: "£" })[currency] || "";
+          return `${symbol}${amount} off${symbol ? "" : ` (${currency})`}`;
+        }
+        return `${offer.value} promo code`;
+      }).join(", ")}`);
+    } else {
+      lines.push(`No explicit promotion found in ${side === "expected" ? "the ad" : "captured landing-page text"}.`);
+    }
+    if (Array.isArray(evidence) && evidence.length) lines.push(`Evidence: ${evidence.join(" · ")}`);
+    return lines;
   }
   if (["product_consistency", "market_language", "offer_eligibility", "service_region"].includes(type)) {
     if (side === "expected") {
@@ -876,7 +911,15 @@ function reviewExplanation(result) {
   const message = result.humanMessage || "No explanation was provided for this check.";
   if (message.startsWith("AI_UNSUPPORTED_EVIDENCE:")) return "The AI described a possible result, but its quoted text did not match the captured campaign or page. Review the source details before launch.";
   if (message.startsWith("TARGET_LOCATION_EVIDENCE_UNAVAILABLE:")) return "The campaign's target locations were not clear in the imported campaign data, so this check could not be confirmed.";
-  if (/^AI_(UNAVAILABLE|INVALID|EMPTY|RESPONSE)/.test(message)) return "The automated review could not complete this check. Run the campaign check again.";
+  if (message === "AI_NOT_CONFIGURED") return "Campaign and landing-page data were captured, but AI checks are not configured for this workspace. Configure the AI endpoint, key, and model to enable this review.";
+  if (message === "INSUFFICIENT_SOURCES") return "The AI check did not receive enough ad-copy or landing-page text to compare.";
+  const httpError = message.match(/^AI_UNAVAILABLE_HTTP_(\d{3})$/);
+  if (httpError) return `Campaign and landing-page data were captured, but the AI endpoint returned HTTP ${httpError[1]}. Check the endpoint, API key, model, and provider logs.`;
+  const requestError = message.match(/^AI_REQUEST_FAILED_([A-Za-z]+)$/);
+  if (requestError) return `Campaign and landing-page data were captured, but the AI request failed (${requestError[1]}). Check worker network access and AI provider settings.`;
+  if (message.startsWith("AI_INVALID_RESPONSE")) return "Campaign and landing-page data were captured, but the AI provider returned a response the app could not use. Check the configured model's JSON response support and worker logs.";
+  if (message === "AI_RESPONSE_TRUNCATED" || message === "AI_EMPTY_RESPONSE" || message === "AI_REFUSED") return `Campaign and landing-page data were captured, but the AI provider returned ${message.replace("AI_", "").toLowerCase().replaceAll("_", " ")}. Check the model response and provider logs.`;
+  if (/^AI_(UNAVAILABLE|INVALID|EMPTY|RESPONSE|REFUSED|MISSING_CHECK|INVALID_STATUS|CONFIDENCE)/.test(message)) return "Campaign and landing-page data were captured, but the AI service did not return a usable result for this check. Check the AI integration and worker logs, then rerun QA.";
   return message;
 }
 
@@ -887,6 +930,10 @@ function severityOrder(severity, status) {
 
 function nextStep(result) {
   const type = String(result.checkType || "").toLowerCase();
+  if (type === "stock_status") return "Confirm the product is in stock and that the landing page reflects its current inventory.";
+  if (type === "server_response_time") return "Check hosting, redirects, and server response time; this check does not measure browser rendering or full page load.";
+  if (type === "destination_url") return "Add or select a website destination in the Meta creative, sync the campaign again, and rerun QA.";
+  if (type === "promotion_consistency") return "Confirm that the discount or promo code shown in the ad matches the landing page, then rerun QA.";
   if (type.includes("budget")) return "Keep combined daily campaign and ad set budgets at or below $100 USD, or adjust the limit before launch.";
   if (type.includes("availability") || type.includes("destination") || type.includes("http")) return "Open the destination and confirm it loads before launch.";
   if (type.includes("copy_quality")) return "Correct the flagged spelling or grammar issues, then rerun QA.";
@@ -902,11 +949,15 @@ function Finding({ result, evidence }) {
   const analysis = parseReportValue(result.aiAnalysisJson) || {};
   const hasCombinedLocationEvidence = Object.hasOwn(analysis, "offer_page_evidence");
   const label = ({
+    destination_url: "Destination URL found",
+    stock_status: "Out-of-stock notice",
+    server_response_time: "Server response time",
     budget: "Daily budget · $100 USD limit",
     availability: "Landing page is up",
     product_consistency: "Product matches campaign",
     market_language: "Language fits targeted locations",
     offer_eligibility: hasCombinedLocationEvidence ? "Offer and delivery availability by location" : "Offer eligibility by location",
+    promotion_consistency: "Ad offer matches landing page",
     service_region: "Delivery or service region",
     copy_quality: "Spelling and grammar · Ad copy"
   })[result.checkType] || result.checkType?.replaceAll("_", " ") || "Campaign check";
