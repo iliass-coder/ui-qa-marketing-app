@@ -9,8 +9,10 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
-    allowedHosts: ["exclusion-aerial-telephone-pierce.trycloudflare.com"],
+    allowedHosts: [".trycloudflare.com"],
     proxy: {
+      "/oauth2": "http://127.0.0.1:8080",
+      "/login/oauth2": "http://127.0.0.1:8080",
       "/api": {
         target: "http://127.0.0.1:8080",
         changeOrigin: true,

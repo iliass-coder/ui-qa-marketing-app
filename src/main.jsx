@@ -20,6 +20,16 @@ const request = async (path, options = {}) => {
     } catch {
       detail = "";
     }
+    detail = ({
+      META_ADS_MANAGEMENT_REQUIRED: "Reconnect Meta Ads and grant the ads_management permission to enable automatic pausing.",
+      META_PERMISSION_DENIED: "Meta did not grant the permission required to pause campaigns. Reconnect Meta Ads and approve the requested access.",
+      EMAIL_VERIFICATION_NOT_CONFIGURED: "Email sign-up is not enabled yet. Configure SMTP and enable email verification, or sign up with Google.",
+      EMAIL_DELIVERY_FAILED: "We could not send the verification email. Check the SMTP settings and try again.",
+      EMAIL_NOT_VERIFIED: "Verify your email using the link we sent before signing in.",
+      EMAIL_ALREADY_REGISTERED: "An account already uses this email. Sign in instead.",
+      GOOGLE_NOT_CONFIGURED: "Google sign-in is not configured on the backend yet.",
+      GOOGLE_ACCOUNT_NOT_AUTHORIZED: "No account uses that Google email yet. Switch to sign up to create a workspace."
+    })[detail] || detail;
     const error = new Error(detail || `Request failed (${response.status})`);
     error.status = response.status;
     throw error;
@@ -30,9 +40,9 @@ const request = async (path, options = {}) => {
 
 const actOnIncident = async (incident, action) => {
   const note = action === "resolve"
-    ? window.prompt("Add a note about the requested resolution. A fresh check must verify recovery before the incident closes.")
+    ? "Resolution requested; verify recovery with a fresh landing page inspection."
     : action === "mark-intentional"
-      ? window.prompt("Why is this page change intentional? A healthy snapshot is required.")
+      ? "Marked intentional by the user from campaign monitoring."
       : null;
   if (["resolve", "mark-intentional"].includes(action) && !note?.trim()) return;
   setBusy(`incident:${incident.id}`);
@@ -109,8 +119,27 @@ function Metric({ label, value, note, tone = "" }) {
 function App() {
   const [auth, setAuth] = useState("loading");
   const [user, setUser] = useState(null);
-  const [loginError, setLoginError] = useState("");
+  const [authCallback] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = { ssoError: params.get("sso_error"), emailVerified: params.get("email_verified") };
+    if (result.ssoError || result.emailVerified) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+    }
+    return result;
+  });
+  const [loginError, setLoginError] = useState(() => authCallback.ssoError === "no_account"
+    ? "No workspace uses that Google email yet. Switch to Sign up to create one."
+    : authCallback.ssoError ? "Google sign-in could not be completed. Please try again." : "");
+  const [loginNotice, setLoginNotice] = useState(() => authCallback.emailVerified === "success"
+    ? "Email verified. You can sign in now."
+    : authCallback.emailVerified ? "That link is invalid or expired. Sign in with your password, then request a new verification link." : "");
   const [loginBusy, setLoginBusy] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [emailSignupEnabled, setEmailSignupEnabled] = useState(false);
+  const [authMode, setAuthMode] = useState("signin");
+  const [signupWorkspaceName, setSignupWorkspaceName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [canResendVerification, setCanResendVerification] = useState(false);
   const [route, setRoute] = useState(routeFromHash);
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState("");
@@ -135,6 +164,12 @@ function App() {
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
     window.addEventListener("hashchange", onHash);
+    request("/api/auth/google/status")
+      .then((result) => {
+        setGoogleEnabled(Boolean(result.enabled));
+        setEmailSignupEnabled(Boolean(result.emailSignupEnabled));
+      })
+      .catch(() => setGoogleEnabled(false));
     request("/api/me").then((me) => {
       setUser(me);
       setAuth("signed-in");
@@ -175,12 +210,76 @@ function App() {
     setLoginBusy(true);
     const form = new FormData(event.currentTarget);
     try {
-      await request("/api/auth/login", { method: "POST", body: { email: form.get("email"), password: form.get("password") } });
-      setAuth("signed-in");
+      if (authMode === "signup") {
+        if (form.get("password") !== form.get("confirmPassword")) {
+          setLoginError("The passwords do not match.");
+          return;
+        }
+        await request("/api/auth/register", {
+          method: "POST",
+          body: {
+            name: form.get("name"),
+            workspaceName: form.get("workspaceName"),
+            email: form.get("email"),
+            password: form.get("password")
+          }
+        });
+        setAuthEmail(String(form.get("email") || ""));
+        setLoginNotice("Account created. Check your inbox for a verification link before signing in.");
+        setAuthMode("signin");
+      } else {
+        await request("/api/auth/login", { method: "POST", body: { email: form.get("email"), password: form.get("password") } });
+        setAuth("signed-in");
+      }
     } catch (error) {
+      setCanResendVerification(error.message === "EMAIL_NOT_VERIFIED");
       setLoginError(error.message === "INVALID_CREDENTIALS" ? "Email or password was not accepted." : error.message);
     } finally {
       setLoginBusy(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    setLoginBusy(true);
+    setLoginError("");
+    try {
+      await request("/api/auth/resend-verification", {
+        method: "POST",
+        body: { email: authEmail }
+      });
+      setCanResendVerification(false);
+      setLoginNotice("If this account still needs verification, a new link has been sent.");
+    } catch (error) {
+      setLoginError(error.message);
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const startGoogleAuth = () => {
+    const params = new URLSearchParams({ flow: authMode });
+    if (authMode === "signup") params.set("workspaceName", signupWorkspaceName);
+    window.location.assign(`/api/auth/google/start?${params.toString()}`);
+  };
+
+  const logout = async () => {
+    setBusy("logout");
+    setLoadError("");
+    try {
+      await request("/api/auth/logout", { method: "POST" });
+      setUser(null);
+      setData(null);
+      setAuth("signed-out");
+    } catch (error) {
+      if (error.status === 401) {
+        setUser(null);
+        setData(null);
+        setAuth("signed-out");
+      } else {
+        setLoadError(`Could not sign out: ${error.message}`);
+      }
+    } finally {
+      setBusy("");
     }
   };
 
@@ -282,7 +381,8 @@ function App() {
         body: {
           email: form.get("email"),
           incidentAlertsEnabled: form.get("incidentAlertsEnabled") === "on",
-          recoveryAlertsEnabled: form.get("recoveryAlertsEnabled") === "on"
+          recoveryAlertsEnabled: form.get("recoveryAlertsEnabled") === "on",
+          autoPauseCampaignOnWebsiteDown: form.get("autoPauseCampaignOnWebsiteDown") === "on"
         }
       });
       await reload();
@@ -308,14 +408,32 @@ function App() {
   if (auth === "loading") return <main className="center-state"><div className="spinner" /><p>Checking your secure session…</p></main>;
   if (auth === "signed-out") {
     return <main className="login-page"><div className="login-brand"><Brand /></div><section className="login-card">
-      <div className="eyebrow">WORKSPACE ACCESS</div><h1>Welcome back.</h1><p>Sign in to review campaigns and monitored pages.</p>
+      <div className="eyebrow">WORKSPACE ACCESS</div><h1>{authMode === "signup" ? "Create your workspace." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start checking campaigns with a secure workspace of your own." : "Sign in to review campaigns and monitored pages."}</p>
       {loadError && <div className="alert error" role="alert">{loadError} Check that the backend is running, then try again.</div>}
       {loginError && <div className="alert error" role="alert">{loginError}</div>}
-      <form onSubmit={login} className="form-stack">
-        <label>Email address<input type="email" name="email" autoComplete="username" required maxLength="254" /></label>
-        <label>Password<input type="password" name="password" autoComplete="current-password" required /></label>
-        <Button kind="primary" type="submit" disabled={loginBusy}>{loginBusy ? "Signing in…" : "Sign in"}</Button>
-      </form><p className="fine-print">Your workspace owner provisions access. Credentials are verified by the backend.</p>
+      {loginNotice && <div className="alert success" role="status">{loginNotice}</div>}
+      {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email sign-up needs SMTP verification enabled. You can still create an account with Google." : "Email sign-up needs SMTP verification enabled. Configure the email settings to create an account."}</div>}
+      <>
+        <Button type="button" className="google-button" disabled={!googleEnabled || (authMode === "signup" && !signupWorkspaceName.trim())} onClick={startGoogleAuth} title={!googleEnabled ? "Google sign-in is not configured" : undefined}>
+          <span className="google-g" aria-hidden="true">G</span>{authMode === "signup" ? "Sign up with Google" : "Sign in with Google"}
+        </Button>
+        {!googleEnabled
+          ? <p className="google-signup-hint">Google sign-in is unavailable until the backend has a Google OAuth client ID and secret.</p>
+          : authMode === "signup" && !signupWorkspaceName.trim() && <p className="google-signup-hint">Enter a workspace name below to continue with Google.</p>}
+        <div className="login-divider"><span>or continue with email</span></div>
+      </>
+      <form key={authMode} onSubmit={login} className="form-stack">
+        {authMode === "signup" && <>
+          <label>Your name<input type="text" name="name" autoComplete="name" required maxLength="80" /></label>
+          <label>Workspace name<input type="text" name="workspaceName" autoComplete="organization" required minLength="2" maxLength="80" value={signupWorkspaceName} onChange={(event) => setSignupWorkspaceName(event.target.value)} /></label>
+        </>}
+        <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" value={authEmail} onChange={(event) => { setAuthEmail(event.target.value); setCanResendVerification(false); }} /></label>
+        <label>Password<input type="password" name="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} required minLength={authMode === "signup" ? 16 : undefined} maxLength="200" /></label>
+        {authMode === "signup" && <label>Confirm password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="16" maxLength="200" /></label>}
+        <Button kind="primary" type="submit" disabled={loginBusy}>{loginBusy ? (authMode === "signup" ? "Creating account…" : "Signing in…") : (authMode === "signup" ? "Create account" : "Sign in")}</Button>
+      </form><p className="fine-print">{authMode === "signup" ? "Use at least 16 characters. Email sign-up requires verification." : "Your session is protected with an HttpOnly cookie."}</p>
+      {authMode === "signin" && canResendVerification && <Button type="button" className="resend-verification" disabled={loginBusy || !authEmail.trim()} onClick={resendVerification}>Resend verification email</Button>}
+      <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to SteadySignal?"} <button type="button" className="text-button" onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setLoginError(""); }}>{authMode === "signup" ? "Sign in" : "Create an account"}</button></p>
     </section></main>;
   }
   if (!data) return <main className="center-state"><div className="spinner" /><p>Loading workspace data…</p>{loadError && <p role="alert">{loadError} <button className="text-button" onClick={reload}>Try again</button></p>}</main>;
@@ -347,7 +465,7 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <div className="breadcrumbs"><span>{user?.workspace?.name || "Workspace"}</span><span aria-hidden="true">/</span><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
-        <div className="topbar-right"><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta Ads connected" : "Meta disconnected"} /><span className="topbar-user">{user?.user?.name || user?.user?.email}</span></div>
+        <div className="topbar-right"><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta Ads connected" : "Meta disconnected"} /><span className="topbar-user">{user?.user?.name || user?.user?.email}</span><Button className="sign-out-button" onClick={logout} disabled={busy === "logout"}>{busy === "logout" ? "Signing out…" : "Sign out"}</Button></div>
       </header>
       <div className="page-content">
         {!connected && <div className="alert connection-alert" role="status"><div><strong>Meta account disconnected</strong><span>Connect Meta to import real campaigns and run prelaunch QA.</span></div><Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
@@ -388,7 +506,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
     <div className="metrics-grid">
       <Metric label="Imported campaigns" value={dashboard.importedCampaigns ?? campaigns.length} note={meta.accounts?.length ? `Across ${meta.accounts.length} connected ad account${meta.accounts.length === 1 ? "" : "s"}` : "From your connected Meta account"} />
       <Metric label="Need a closer look" value={needsReview.length} note={openIncidents.length ? `${openIncidents.length} active campaign incident${openIncidents.length === 1 ? "" : "s"}` : "Prelaunch findings and stale checks"} tone={needsReview.length ? "coral" : ""} />
-      <Metric label="Campaigns monitored" value={`${dashboard.monitoredCampaigns ?? monitored.length}`} note="Current Meta destinations checked every 30 minutes" tone="green" />
+      <Metric label="Campaigns monitored" value={`${dashboard.monitoredCampaigns ?? monitored.length}`} note="Current Meta destinations checked every minute" tone="green" />
     </div>
     <div className="overview-grid">
       <section className="panel campaign-queue">
@@ -397,7 +515,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
           <div className="campaign-list">{needsReview.slice(0, 5).map((item) => <CampaignRow key={item.campaign.id} item={item} busy={busy} runQa={runQa} />)}</div>}
       </section>
       <section className="panel watch-summary">
-        <div className="panel-heading compact"><div><h2>Campaign watch</h2><p>30-minute monitoring schedule</p></div><a className="text-link" href="#/site-watch">Open watch</a></div>
+        <div className="panel-heading compact"><div><h2>Campaign watch</h2><p>Checks every minute</p></div><a className="text-link" href="#/site-watch">Open watch</a></div>
         {monitored.length === 0 ? <Empty title="No monitored campaigns">Use Monitor campaign in the Campaigns list to start a watch.</Empty> :
           <div className="watch-list">{monitored.slice(0, 4).map((item) => <CampaignWatchSummary key={item.campaign.id} item={item} incident={openIncidents.find((entry) => entry.campaignId === item.campaign.id)} />)}</div>}
         <div className="watch-footer"><span>Next scheduled check</span><strong>{formatDate(monitored.map((item) => item.nextMonitoringAt).filter(Boolean).sort()[0])}</strong></div>
@@ -473,7 +591,7 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
       <Metric label="Currently live" value={campaigns.length - nonLive.length} note="Active status from Meta" tone="green" />
     </div>
     <section className="panel table-panel">
-      <div className="panel-heading"><div><h2>Campaign queue</h2><p>Monitor campaign destinations every 30 minutes, run QA, or inspect a saved report.</p></div></div>
+      <div className="panel-heading"><div><h2>Campaign queue</h2><p>Monitor campaign destinations every minute, run QA, or inspect a saved report.</p></div></div>
       <div className="filter-tabs" role="group" aria-label="Filter campaigns">{["All campaigns", "Before launch", "Live"].map((name) => <button key={name} className={`filter-tab ${filter === name ? "selected" : ""}`} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}</button>)}</div>
       {busy === "meta-accounts" ? <div className="center-state inline campaign-loading" role="status" aria-live="polite"><div className="spinner" aria-hidden="true" /><p>Loading campaigns for the selected ad account…</p></div> : rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} /> : <Empty title={accountCampaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{accountCampaigns.length ? "Choose another campaign filter." : meta.connection ? (accounts.length && !accountFilter ? "Choose an ad account from the dropdown to sync and display its campaigns." : "No campaigns were returned for this ad account. Try syncing again or choose another account.") : "Connect Meta Ads to import real campaigns."}</Empty>}
     </section>
@@ -859,7 +977,7 @@ function SiteWatch({ data, busy, checkCampaign, monitorCampaign, actOnIncident }
       </section>
       <section className="panel site-detail-panel">
         {!selected ? <Empty title="Choose a campaign">Select a monitored campaign to inspect its latest Meta destinations and check history.</Empty> : <>
-          <div className="site-detail-head"><div><div className="eyebrow">MONITORED CAMPAIGN</div><h2>{selected.campaign.name}</h2><p>{selected.campaign.objective || "Meta campaign"} | {selected.monitoringIntervalMinutes || 30}-minute checks</p></div><Status value={selected.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={selected.lastMonitoringAt ? "Watch active" : "Waiting for first check"} /></div>
+          <div className="site-detail-head"><div><div className="eyebrow">MONITORED CAMPAIGN</div><h2>{selected.campaign.name}</h2><p>{selected.campaign.objective || "Meta campaign"} | Checks every minute</p></div><Status value={selected.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={selected.lastMonitoringAt ? "Watch active" : "Waiting for first check"} /></div>
           <div className="site-timing"><div><span>Last check</span><strong>{formatDate(selected.lastMonitoringAt)}</strong></div><div><span>Next scheduled</span><strong>{formatDate(selected.nextMonitoringAt)}</strong></div><div><span>Current destinations</span><strong>{selected.monitoringDestinationCount ?? 0}</strong></div></div>
           <div className="site-actions"><Button kind="primary" disabled={busy === "campaign-monitor:" + selected.campaign.id} onClick={() => checkCampaign(selected.campaign.id)}>{busy === "campaign-monitor:" + selected.campaign.id ? "Refreshing campaign..." : "Refresh from Meta and check"}</Button><Button disabled={busy === "monitor:" + selected.campaign.id} onClick={() => monitorCampaign(selected.campaign.id, false)}>Pause campaign watch</Button></div>
           {detailError && <div className="alert error" role="alert">{detailError}</div>}
@@ -885,10 +1003,11 @@ function IncidentCard({ incident, actOnIncident, busy }) {
 function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
   const { meta, campaigns = [], preferences } = data;
   const connected = meta.connection?.status === "CONNECTED";
+  const canPauseMetaCampaigns = meta.connection?.scopes?.includes("ads_management") === true;
   const accounts = meta.accounts || [];
   return <>
     <PageHeading eyebrow="SETTINGS" title="Keep your checks useful." >Manage the Meta connection, campaign monitoring, and notification preferences.</PageHeading>
-    <section className="panel settings-account"><div className="settings-title"><div><h2>Meta Ads account</h2><p>Read-only campaign access for QA. SteadySignal does not edit, pause, or publish ads.</p></div><span className="meta-letter" aria-hidden="true">M</span></div>
+    <section className="panel settings-account"><div className="settings-title"><div><h2>Meta Ads account</h2><p>Read-only campaign access for QA. SteadySignal never edits or publishes ads; automatic pausing is optional.</p></div><span className="meta-letter" aria-hidden="true">M</span></div>
       <div className="settings-connection"><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? meta.connection.status || "Connected" : "Not connected"} />
         <div className="account-details">{accounts.length ? accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected ? " · Selected" : ""}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>) : <span><strong>{connected ? "Account sync pending" : "No ad account connected"}</strong><small>{connected ? "Sync Meta Ads to discover available accounts." : "Connect using Meta OAuth; tokens stay on the server."}</small></span>}</div>
         {meta.connection?.lastSyncAt && <small>Last sync {formatDate(meta.connection.lastSyncAt)}</small>}
@@ -900,11 +1019,12 @@ function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
       {meta.connection?.lastError && <div className="alert error">{meta.connection.lastError}</div>}
     </section>
     <div className="settings-grid">
-      <section className="panel settings-monitoring"><h2>Campaign monitoring</h2><p>Each scheduled check refreshes campaign and ad destinations from Meta before inspecting the pages.</p><div className="setting-line"><span>Check interval</span><strong>Every 30 minutes</strong></div><div className="setting-line"><span>Campaigns monitored</span><strong>{campaigns.filter((item) => item.monitoringEnabled).length} active</strong></div><a className="text-link" href="#/site-watch">Manage campaign watches</a></section>
+      <section className="panel settings-monitoring"><h2>Campaign monitoring</h2><p>Each scheduled check refreshes campaign and ad destinations from Meta before inspecting the pages.</p><div className="setting-line"><span>Check interval</span><strong>Every minute</strong></div><div className="setting-line"><span>Campaigns monitored</span><strong>{campaigns.filter((item) => item.monitoringEnabled).length} active</strong></div><a className="text-link" href="#/site-watch">Manage campaign watches</a></section>
       <form className="panel settings-notifications" onSubmit={savePreferences}><h2>Notifications</h2><p>Emails are queued only when SMTP delivery is enabled by the workspace backend.</p>
         <label className="form-label">Notification email<input type="email" name="email" required maxLength="254" defaultValue={preferences.email} /></label>
         <label className="toggle-row"><span><strong>New incidents</strong><small>When a monitored page changes or fails.</small></span><input type="checkbox" name="incidentAlertsEnabled" defaultChecked={preferences.incidentAlertsEnabled} aria-label="Email me about new incidents" /></label>
         <label className="toggle-row"><span><strong>Recovery updates</strong><small>When a new check verifies recovery.</small></span><input type="checkbox" name="recoveryAlertsEnabled" defaultChecked={preferences.recoveryAlertsEnabled} aria-label="Email me about recovery updates" /></label>
+        <label className="toggle-row"><span><strong>Pause campaigns when a landing page is down</strong><small>Pauses active campaigns after two consecutive failed checks. If email delivery is enabled, a confirmation is sent to {preferences.email}. {canPauseMetaCampaigns ? "" : "Reconnect Meta Ads and grant ads_management access."}</small></span><input type="checkbox" name="autoPauseCampaignOnWebsiteDown" defaultChecked={preferences.autoPauseCampaignOnWebsiteDown} aria-label="Automatically pause campaigns after repeated landing page failures" /></label>
         <Button kind="primary" type="submit" disabled={busy === "preferences"}>{busy === "preferences" ? "Saving…" : "Save preferences"}</Button>
       </form>
     </div>

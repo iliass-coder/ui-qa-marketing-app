@@ -4,7 +4,7 @@ Import this folder into **Figma Desktop** using `Plugins → Development → Imp
 
 ## Screens and flows
 
-- **Connect account:** first-use setup explains the Meta connection and 30-minute page checks.
+- **Connect account:** first-use setup explains the Meta connection and one-minute page checks, with optional campaign pause automation on confirmed outages.
 - **Overview:** campaign queue, QA findings, and site-watch status.
 - **Campaigns:** launch queue with prelaunch and live states.
 - **QA report:** ad creative and landing page shown side by side, with the mismatch and a suggested fix.
