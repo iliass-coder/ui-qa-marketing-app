@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { campaignPhase, formatDate, statusTone, valueText } from "./domain.js";
 import { Icon } from "./icons.jsx";
 import { Brand } from "./Brand.jsx";
 import { LandingPage } from "./LandingPage.jsx";
 import { resolveRoute } from "./routes.js";
+import { INCIDENT_REPORT_LIMIT, INCIDENT_TYPES, groupIncidents, incidentReportHref, incidentType, incidentTypeLabel, incidentValueText } from "./incidents.js";
 import "./styles.css";
+import "./overview.css";
 
 const request = async (path, options = {}) => {
   const method = options.method || "GET";
@@ -25,6 +27,7 @@ const request = async (path, options = {}) => {
       detail = "";
     }
     detail = ({
+      INTENTIONAL_SETTING_NOT_ACTIVE: "This incident type is already using normal monitoring. Refresh to see its current status.",
       META_ADS_MANAGEMENT_REQUIRED: "Reconnect Meta Ads and grant the ads_management permission to enable automatic pausing.",
       META_PERMISSION_DENIED: "Meta did not grant the permission required to pause campaigns. Reconnect Meta Ads and approve the requested access.",
       EMAIL_VERIFICATION_NOT_CONFIGURED: "Email sign-up is not enabled yet. Configure SMTP and enable email verification, or sign up with Google.",
@@ -76,7 +79,7 @@ function Button({ children, icon, kind = "secondary", className = "", ...props }
 
 function Status({ value, label }) {
   const raw = label || value || "Not checked";
-  const text = ({ STALE: "Out of date", PASS: "Passed", FAIL: "Needs action", WARNING: "Review needed", UNKNOWN: "Not checked", OPEN: "Open", CONNECTED: "Connected", RESOLVED: "Resolved" })[raw] || metaCodeLabel(raw);
+  const text = ({ STALE: "Out of date", PASS: "Passed", FAIL: "Needs action", WARNING: "Review needed", UNKNOWN: "Not checked", OPEN: "Open", CONNECTED: "Connected", RESOLVED: "Resolved", INTENTIONAL: "Intentional", REVERTED: "Reverted" })[raw] || metaCodeLabel(raw);
   return <span className={`status ${statusTone(value)}`}><span className="status-dot" aria-hidden="true" />{text}</span>;
 }
 
@@ -116,6 +119,7 @@ function App() {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState("");
+  const [incidentDecision, setIncidentDecision] = useState(null);
   const [toast, setToast] = useState("");
 
   const loadApp = useCallback(async () => {
@@ -381,31 +385,41 @@ function App() {
     }
   };
 
-  const actOnIncident = async (incident, action) => {
-    const note = action === "resolve"
-      ? "Resolution requested; verify recovery with a fresh landing page inspection."
-      : action === "mark-intentional"
-        ? "Marked intentional by the user from campaign monitoring."
-        : null;
-    if (["resolve", "mark-intentional"].includes(action) && !note?.trim()) return;
+  const performIncidentAction = async (incident, action) => {
     setBusy(`incident:${incident.id}`);
     setLoadError("");
+    setToast("");
+    let reverted = false;
     try {
       const result = await request(`/api/incidents/${incident.id}/${action}`, {
         method: "POST",
-        ...(note ? { body: { note: note.trim() } } : {})
+        ...(action === "mark-intentional" ? { body: { note: "Marked intentional until explicitly reverted by a workspace member." } } : {})
       });
+      if (action === "revert-intentional") {
+        reverted = true;
+        await reload();
+        setToast("Normal monitoring restored. A fresh inspection is running.");
+      }
       if (action !== "mark-intentional" && result?.id) {
         const complete = await waitFor("/api/jobs", result.id);
         if (complete.status === "FAILED") throw new Error(complete.errorMessage || "The incident check failed.");
       }
       await reload();
-      setToast(action === "mark-intentional" ? "The change was marked intentional." : "Fresh inspection completed. Incident status reflects the backend's verified result.");
+      setToast(action === "mark-intentional"
+        ? "This incident type will stay intentional until you revert it."
+        : action === "revert-intentional"
+          ? "Normal monitoring restored. A fresh inspection has completed."
+          : "Fresh inspection completed. Incident status reflects the verified result.");
     } catch (error) {
-      setLoadError(error.message);
+      setLoadError(reverted ? `Normal monitoring was restored, but the fresh result could not be loaded: ${error.message}` : error.message);
     } finally {
       setBusy("");
     }
+  };
+
+  const actOnIncident = (incident, action) => {
+    if (action === "mark-intentional") setIncidentDecision(incident);
+    else performIncidentAction(incident, action);
   };
 
   const disconnectMeta = async () => {
@@ -467,6 +481,7 @@ function App() {
         <NavItem id="overview" active={activeNav === "overview"} icon="overview" label="Overview" />
         <NavItem id="campaigns" active={activeNav === "campaigns"} icon="campaigns" label="Campaigns" count={data.campaigns.length} />
         <NavItem id="site-watch" active={activeNav === "site-watch"} icon="watch" label="Campaign watch" count={data.campaigns.filter((item) => item.monitoringEnabled).length} />
+        <NavItem id="incidents" active={activeNav === "incidents"} icon="warning" label="Incident report" />
         <NavItem id="settings" active={activeNav === "settings"} icon="settings" label="Settings" />
       </nav>
       <div className="sidebar-account">
@@ -479,7 +494,7 @@ function App() {
     </aside>
     <main className="main-area">
       <header className="topbar">
-        <div className="breadcrumbs"><Icon name={activeNav === "site-watch" ? "watch" : activeNav} size={17} /><span>Workspace</span><Icon name="chevron" size={12} /><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
+        <div className="breadcrumbs"><Icon name={activeNav === "site-watch" ? "watch" : activeNav === "incidents" ? "warning" : activeNav} size={17} /><span>Workspace</span><Icon name="chevron" size={12} /><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page === "incidents" ? "Incident report" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
         <div className="topbar-right"><span className="workspace-date"><Icon name="calendar" size={15} />{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date())}</span><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta connected" : "Meta disconnected"} /><button className="icon-button mobile-signout" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={17} /></button></div>
       </header>
       <div className={`page-content page-${route.page}`} id="main-content" tabIndex="-1">
@@ -490,13 +505,44 @@ function App() {
         {route.page === "overview" && <Overview data={data} busy={busy} runQa={runQa} syncMeta={syncMeta} />}
         {route.page === "campaigns" && <Campaigns data={data} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} syncMeta={syncMeta} selectMetaAccounts={saveMetaAccounts} />}
         {route.page === "report" && <QaReport campaignId={route.id} refreshKey={data.campaigns?.find((item) => item.campaign?.id === route.id)?.lastQa?.id || ""} runQa={runQa} busy={busy} />}
-        {route.page === "site-watch" && <SiteWatch data={data} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
+        {route.page === "site-watch" && <SiteWatch data={data} selectedCampaignId={route.campaignId} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
+        {route.page === "incidents" && <IncidentReport data={data} route={route} busy={busy} actOnIncident={actOnIncident} />}
         {route.page === "settings" && <Settings data={data} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} />}
       </div>
       <footer className="workspace-footer"><span>SteadySignal <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
       {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast("")} aria-label="Dismiss notification">×</button></div>}
     </main>
+    {incidentDecision && <IncidentDecisionDialog incident={incidentDecision} campaignName={data.campaigns.find((item) => item.campaign.id === incidentDecision.campaignId)?.campaign.name} onCancel={() => setIncidentDecision(null)} onConfirm={() => {
+      const incident = incidentDecision;
+      setIncidentDecision(null);
+      performIncidentAction(incident, "mark-intentional");
+    }} />}
   </div>;
+}
+
+function IncidentDecisionDialog({ incident, campaignName, onCancel, onConfirm }) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    dialog.current.showModal();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, []);
+  const scope = incident.campaignId
+    ? `the campaign “${campaignName || incident.campaignId.slice(0, 8)}”`
+    : "this page";
+  return <dialog ref={dialog} className="incident-decision-dialog" aria-labelledby="incident-decision-title" aria-describedby="incident-decision-description" onCancel={(event) => { event.preventDefault(); onCancel(); }} onClick={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+    <div className="incident-decision-content">
+      <span className="eyebrow">CAMPAIGN MONITORING</span>
+      <h2 id="incident-decision-title">Mark {incidentTypeLabel(incident.type).toLowerCase()} intentional?</h2>
+      <div id="incident-decision-description">
+        <p>This applies to all current and future incidents of this type for {scope}{incident.campaignId ? ", across all its destination pages" : ""}.</p>
+        <p><strong>It stays intentional until someone explicitly reverts it.</strong> Future checks will still record what they observe, but incidents of this type will not open alerts.</p>
+        {incident.campaignId && incident.type === "availability" && <p className="incident-decision-warning">Automatic campaign pausing for page availability failures will also be disabled until this setting is reverted.</p>}
+        <p>Use <strong>Revert intentional</strong> in the campaign summary or incident report to restore normal monitoring.</p>
+      </div>
+      <div className="incident-decision-actions"><Button autoFocus onClick={onCancel}>Cancel</Button><Button kind="primary" onClick={onConfirm}>Mark intentional</Button></div>
+    </div>
+  </dialog>;
 }
 
 function NavItem({ id, active, icon, label, count }) {
@@ -504,62 +550,122 @@ function NavItem({ id, active, icon, label, count }) {
 }
 
 function Overview({ data, busy, runQa, syncMeta }) {
-  const { campaigns = [], incidents = [], dashboard = {}, meta = {} } = data;
+  const { campaigns = [], incidents = [], meta = {} } = data;
+  const [filter, setFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(4);
+  const attention = useRef(null);
+  const connected = meta.connection?.status === "CONNECTED";
   const needsReview = campaigns.filter((item) => {
-    const status = item.qaState || item.verdict;
+    const status = String(item.qaState || item.verdict || "UNKNOWN").toUpperCase();
     const campaign = item.campaign || {};
-    return campaignPhase(campaign) !== "Live" && (!item.lastQa || ["FAIL", "WARNING", "STALE", "UNKNOWN"].includes(status));
+    return campaignPhase(campaign) !== "Live" && (!item.lastQa || ["FAIL", "WARNING", "STALE", "UNKNOWN", "NOT CHECKED"].includes(status));
+  }).sort((a, b) => {
+    const priority = { FAIL: 0, WARNING: 1, STALE: 2, UNKNOWN: 3 };
+    return (priority[String(a.qaState || a.verdict).toUpperCase()] ?? 3) - (priority[String(b.qaState || b.verdict).toUpperCase()] ?? 3);
   });
   const monitored = campaigns.filter((item) => item.monitoringEnabled);
-  const openIncidents = incidents.filter((incident) => incident.status === "OPEN");
-  const recent = [...campaigns].sort((a, b) => new Date(b.campaign?.updatedAt || 0) - new Date(a.campaign?.updatedAt || 0)).slice(0, 4);
+  const openIncidents = incidents.filter((incident) => incident.status === "OPEN").sort((a, b) =>
+    Number(b.type === "availability") - Number(a.type === "availability") ||
+    (Date.parse(b.lastSeenAt || b.createdAt) || 0) - (Date.parse(a.lastSeenAt || a.createdAt) || 0)
+  );
+  const campaignById = new Map(campaigns.map((item) => [item.campaign.id, item]));
+  const incidentsByCampaign = new Map();
+  for (const incident of openIncidents) {
+    if (!incidentsByCampaign.has(incident.campaignId)) incidentsByCampaign.set(incident.campaignId, incident);
+  }
+  const watchPreview = [...monitored].sort((a, b) =>
+    Number(incidentsByCampaign.has(b.campaign.id)) - Number(incidentsByCampaign.has(a.campaign.id))
+  ).slice(0, 4);
+  const selectedAccounts = meta.accounts?.filter((account) => account.selected).length || 0;
+  const coverage = campaigns.length ? Math.round(monitored.length / campaigns.length * 100) : 0;
+  const allActions = [
+    ...openIncidents.map((incident) => ({ type: "incident", id: `incident:${incident.id}`, incident })),
+    ...needsReview.map((item) => ({ type: "qa", id: `qa:${item.campaign.id}`, item }))
+  ];
+  const actions = allActions.filter((action) => filter === "all" || action.type === filter);
+  const selectFilter = (value, focus = false) => {
+    setFilter(value);
+    setVisibleCount(4);
+    if (focus) {
+      attention.current?.focus({ preventScroll: true });
+      attention.current?.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    }
+  };
+
   return <>
-    <PageHeading eyebrow="THE BIG PICTURE" title="Campaign overview" action={meta.connection ? <Button kind="primary" icon="refresh" onClick={syncMeta} disabled={busy === "sync"}>{busy === "sync" ? "Syncing campaigns…" : "Sync campaigns"}</Button> : <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}>Campaign readiness and landing-page health, in one place.</PageHeading>
-    <div className="metrics-grid">
-      <Metric label="Total campaigns" value={dashboard.importedCampaigns ?? campaigns.length} note={meta.accounts?.some((account) => account.selected) ? `From ${meta.accounts.filter((account) => account.selected).length} selected ad account${meta.accounts.filter((account) => account.selected).length === 1 ? "" : "s"}` : "From your connected Meta account"} />
-      <Metric label="Awaiting review" value={needsReview.length} note="Campaigns that need a fresh QA check" tone="coral" />
-      <Metric label="On campaign watch" value={dashboard.monitoredCampaigns ?? monitored.length} note="Destinations checked every 60 seconds" tone="green" />
+    <div className="overview-heading">
+      <div><div className="eyebrow">YOUR WORKSPACE</div><h1>Overview<span className="overview-title-dot">.</span></h1><p>Your campaigns and next steps, at a glance.</p></div>
+      <div className="overview-signal-art" aria-hidden="true">
+        <svg viewBox="0 0 340 132" fill="none" focusable="false">
+          <g className="overview-signal-guides"><path d="M12 66h316M242 5v122" /><circle cx="242" cy="66" r="57" /><circle cx="242" cy="66" r="38" /><circle cx="242" cy="66" r="19" /></g>
+          <path className="overview-signal-trace" d="M18 66h104l12-19 17 40 20-63 23 84 18-42h87" />
+          <circle className="overview-signal-node" cx="299" cy="66" r="4" /><circle className="overview-signal-orbit" cx="242" cy="9" r="3" />
+        </svg>
+      </div>
+      {connected
+        ? <Button className="overview-sync" icon="refresh" onClick={syncMeta} disabled={Boolean(busy)}>{busy === "sync" ? "Syncing campaigns…" : "Sync campaigns"}</Button>
+        : <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}
     </div>
-    <section className="health-banner" aria-label="Campaign health summary">
-      <div className="health-copy"><div className="health-kicker"><span className="signal-dot" /> WORKSPACE PULSE</div><h2>{openIncidents.length ? `${openIncidents.length} incident${openIncidents.length === 1 ? " needs" : "s need"} a closer look.` : "Keep your next launch in focus."}</h2><p>{openIncidents.length ? "Review changes and availability issues across your monitored landing pages." : "Review your campaign details and landing pages, then keep watch as things change."}</p><a href={openIncidents.length ? "#/site-watch" : "#/campaigns"}>{openIncidents.length ? "Review open incidents" : "Explore your campaigns"}<Icon name="arrow" size={17} /></a></div>
-      <div className="health-coverage"><div className="coverage-ring" style={{ "--coverage": `${campaigns.length ? Math.round(monitored.length / campaigns.length * 100) : 0}%` }}><div><strong>{monitored.length}<span>/{campaigns.length}</span></strong><small>ON WATCH</small></div></div><div className="coverage-copy"><span className="coverage-caption">MONITORING COVERAGE</span><strong>Eyes on your<br />landing pages.</strong><small><span className="signal-dot online" /> Checks every minute</small></div></div>
+
+    <section className="overview-metrics" aria-label="Workspace summary">
+      <OverviewMetric label="Campaigns" value={campaigns.length} note={selectedAccounts ? `Across ${selectedAccounts} ad account${selectedAccounts === 1 ? "" : "s"}` : "Your imported campaigns"} icon="campaigns" tone="total" href="#/campaigns" />
+      <OverviewMetric label="To review" value={needsReview.length} note="Before your next launch" icon="shield" tone={needsReview.length ? "review" : ""} onClick={() => selectFilter("qa", true)} />
+      <OverviewMetric label="On watch" value={monitored.length} note="Checked every minute" icon="watch" tone="watch" href="#/site-watch" />
+      <OverviewMetric label="Open incidents" value={openIncidents.length} note={openIncidents.length ? "Landing-page issues to review" : "No open issues"} icon="warning" tone={openIncidents.length ? "incident" : ""} onClick={() => selectFilter("incident", true)} />
     </section>
-    <div className="overview-grid">
-      <section className="panel campaign-queue">
-        <div className="panel-heading"><div className="section-title"><span className="section-icon"><Icon name="campaigns" /></span><div><h2>Up next for review <span className="count-label">{needsReview.length}</span></h2><p>A fresh check before your next launch.</p></div></div><a className="text-link" href="#/campaigns">View all <Icon name="arrow" size={15} /></a></div>
-        {needsReview.length === 0 ? <Empty title={campaigns.length ? "You're up to date" : "Your campaigns will appear here"}>{campaigns.length ? "No campaigns are waiting for review." : meta.connection ? "Sync Meta Ads to bring your campaigns into this workspace." : "Connect a Meta Ads account to get started."}</Empty> :
-          <div className="campaign-list">{needsReview.slice(0, 4).map((item) => <CampaignRow key={item.campaign.id} item={item} busy={busy} runQa={runQa} />)}</div>}
+
+    <div className="overview-workspace">
+      <section className="overview-panel overview-attention" ref={attention} tabIndex="-1" id="overview-attention" aria-labelledby="overview-attention-title">
+        <div className="overview-panel-heading"><div><h2 id="overview-attention-title">Needs attention<span className="overview-count">{allActions.length}</span></h2><p>Open incidents first. Campaign checks next.</p></div></div>
+        <div className="overview-filters" role="group" aria-label="Filter actions">
+          {[{ id: "all", label: "All", count: allActions.length }, { id: "incident", label: "Incidents", count: openIncidents.length }, { id: "qa", label: "QA checks", count: needsReview.length }].map((option) =>
+            <button key={option.id} type="button" className={`overview-filter ${filter === option.id ? "is-active" : ""}`} aria-pressed={filter === option.id} aria-controls="overview-action-list" onClick={() => selectFilter(option.id)}>{option.label}<span>{option.count}</span></button>
+          )}
+        </div>
+        <div id="overview-action-list">
+          {actions.length ? <ul className="overview-action-list">{actions.slice(0, visibleCount).map((action) => action.type === "incident"
+            ? <OverviewIncidentRow key={action.id} incident={action.incident} campaignName={campaignById.get(action.incident.campaignId)?.campaign.name} />
+            : <OverviewQaRow key={action.id} item={action.item} busy={busy} runQa={runQa} />
+          )}</ul> : <div className="overview-empty"><span><Icon name={campaigns.length ? "check" : "campaigns"} size={24} /></span><h3>{!campaigns.length && !allActions.length ? "Your workspace starts here" : filter === "incident" ? "No open incidents" : filter === "qa" ? "No campaigns need review" : "You're all caught up"}</h3><p>{!campaigns.length && !allActions.length ? connected ? "Sync your Meta campaigns to run your first check." : "Connect Meta Ads to bring your campaigns into view." : filter === "incident" ? "Any new landing-page issues will appear here." : "Your next action will appear here when it's needed."}</p></div>}
+        </div>
+        {actions.length > 0 && <div className="overview-panel-footer"><span aria-live="polite">Showing {Math.min(visibleCount, actions.length)} of {actions.length}</span>{actions.length > visibleCount ? <button type="button" className="text-link overview-show-more" onClick={() => setVisibleCount((count) => count + 4)}>Show more <Icon name="chevron" size={14} /></button> : <a className="text-link" href={filter === "incident" ? incidentReportHref({ status: "OPEN" }) : "#/campaigns"}>{filter === "incident" ? "Incident report" : "All campaigns"}<Icon name="arrow" size={14} /></a>}</div>}
       </section>
-      <section className="panel watch-summary">
-        <div className="panel-heading"><div className="section-title"><span className="section-icon"><Icon name="watch" /></span><div><h2>Always on watch</h2><p>Your landing pages, in focus.</p></div></div><span className={`live-label ${monitored.length ? "" : "is-inactive"}`}><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "LIVE" : "INACTIVE"}</span></div>
-        {monitored.length === 0 ? <Empty title="No monitored campaigns">Use Monitor campaign in the Campaigns list to start a watch.</Empty> :
-          <div className="watch-list">{monitored.slice(0, 4).map((item) => <CampaignWatchSummary key={item.campaign.id} item={item} incident={openIncidents.find((entry) => entry.campaignId === item.campaign.id)} />)}</div>}
-        <div className="watch-footer"><span><Icon name="clock" size={14} /> Every 60 seconds</span><a className="text-link" href="#/site-watch">View monitoring <Icon name="arrow" size={14} /></a></div>
+
+      <section className="overview-panel overview-monitoring" aria-labelledby="overview-watch-title">
+        <div className="overview-panel-heading"><div><h2 id="overview-watch-title">Campaign watch</h2><p>Landing pages, checked around the clock.</p></div><span className={`overview-live ${monitored.length ? "is-live" : ""}`}><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "Live" : "Inactive"}</span></div>
+        <div className="overview-coverage"><div><span>Monitoring coverage</span><strong>{coverage}<span>%</span></strong></div><div className="overview-coverage-track" role="meter" aria-label="Campaigns on watch" aria-valuenow={monitored.length} aria-valuemin={0} aria-valuemax={campaigns.length || 1} aria-valuetext={`${monitored.length} of ${campaigns.length} campaigns on watch`}><span style={{ width: `${coverage}%` }} /></div><p><strong>{monitored.length}</strong> of {campaigns.length} campaigns on watch</p></div>
+        {monitored.length ? <ul className="overview-watch-list">{watchPreview.map((item) => <OverviewWatchRow key={item.campaign.id} item={item} incident={incidentsByCampaign.get(item.campaign.id)} />)}</ul> : <div className="overview-empty overview-watch-empty"><span><Icon name="watch" size={24} /></span><h3>Start your first watch</h3><p>Monitor a campaign to check its landing pages every minute.</p><a className="text-link" href="#/campaigns">Choose campaigns <Icon name="arrow" size={15} /></a></div>}
+        <div className="overview-panel-footer"><span><Icon name="clock" size={13} /> Every 60 seconds</span><a className="text-link" href="#/site-watch">{monitored.length > watchPreview.length ? `View all ${monitored.length}` : "Manage watch"}<Icon name="arrow" size={14} /></a></div>
       </section>
     </div>
-    <section className="panel recent-panel">
-      <div className="panel-heading"><div className="section-title"><span className="section-icon"><Icon name="clock" /></span><div><h2>Recently updated</h2><p>The latest from your connected ad accounts.</p></div></div><a className="text-link" href="#/campaigns">All campaigns <Icon name="arrow" size={15} /></a></div>
-      {recent.length === 0 ? <Empty title="No campaign data">When a Meta account is connected and synced, imported campaign status will appear here.</Empty> :
-        <CampaignTable items={recent} busy={busy} runQa={runQa} />}
-    </section>
+
+    <div className="overview-data-note"><Icon name="meta" size={17} /><span>{connected ? meta.connection.lastSyncAt ? <>Last synced from Meta <time dateTime={meta.connection.lastSyncAt}>{formatDate(meta.connection.lastSyncAt)}</time></> : "Connected to Meta. Sync to refresh your campaigns." : "Connect Meta to keep your campaign data in sync."}</span><a href="#/settings">Connection settings<Icon name="arrow" size={12} /></a></div>
   </>;
 }
 
-function CampaignRow({ item, busy, runQa }) {
-  const c = item.campaign;
-  const needsRun = !item.lastQa || item.qaState === "STALE" || item.qaState === "Not checked";
-  return <article className="campaign-row">
-    <div className="campaign-initial" aria-hidden="true">{(c.name || "C").slice(0, 1).toUpperCase()}</div>
-    <div className="campaign-row-main"><a className="campaign-title" href={`#/report/${c.id}`}>{c.name}</a><div className="campaign-sub">{campaignObjective(c.objective)} <span>·</span> {item.adCount ?? 0} ad{item.adCount === 1 ? "" : "s"}</div>
-    </div>
-    <Status value={item.verdict || item.qaState} label={item.qaState || "Not checked"} />
-    {needsRun ? <Button className="row-action" onClick={() => runQa(c.id)} disabled={busy === `qa:${c.id}`}>{busy === `qa:${c.id}` ? "Checking…" : "Run check"}<Icon name="arrow" size={14} /></Button> : <Button className="row-action" onClick={() => navigate(`report/${c.id}`)}>View report<Icon name="arrow" size={14} /></Button>}
-  </article>;
+function OverviewMetric({ label, value, note, icon, tone = "", href, onClick }) {
+  const Component = href ? "a" : "button";
+  return <Component className={`overview-metric ${tone}`} {...(href ? { href } : { type: "button", onClick, "aria-controls": "overview-attention" })}><span className="overview-metric-label">{label}<Icon name={icon} size={17} /></span><strong>{value}<Icon name="arrow" size={19} /></strong><span className="overview-metric-note">{note}</span></Component>;
 }
 
-function CampaignWatchSummary({ item, incident }) {
-  const campaign = item.campaign;
-  return <a className="watch-item" href="#/site-watch"><span className={`watch-state ${incident ? "is-incident" : "is-ok"}`}><Icon name={incident ? "warning" : "globe"} size={18} /></span><span className="watch-item-copy"><strong>{campaign.name}</strong><small>{incident ? "Landing page needs attention" : item.lastMonitoringAt ? "Last check " + formatDate(item.lastMonitoringAt, { dateStyle: undefined, timeStyle: "short" }) : "Waiting for the first check"}</small></span><Icon name="chevron" size={14} /></a>;
+function OverviewQaRow({ item, busy, runQa }) {
+  const { campaign } = item;
+  const state = String(item.qaState || item.verdict || "UNKNOWN").toUpperCase();
+  const needsRun = !item.lastQa || ["STALE", "UNKNOWN", "NOT CHECKED"].includes(state);
+  const checking = busy === `qa:${campaign.id}`;
+  return <li className="overview-action-row"><span className="overview-avatar" aria-hidden="true">{(campaign.name || "C").slice(0, 1).toUpperCase()}</span><div className="overview-row-copy"><a href={`#/report/${campaign.id}`}>{campaign.name}</a><div className="overview-row-meta"><span>{campaignObjective(campaign.objective)} · {item.adCount ?? 0} ad{item.adCount === 1 ? "" : "s"}</span><Status value={state} /></div></div>{needsRun ? <Button className="overview-row-action" onClick={() => runQa(campaign.id)} disabled={Boolean(busy)} aria-label={`${checking ? "Checking" : "Run check for"} ${campaign.name}`}>{checking ? "Checking…" : "Run check"}<Icon name={checking ? "refresh" : "arrow"} size={14} /></Button> : <a className="button overview-row-action" href={`#/report/${campaign.id}`} aria-label={`View report for ${campaign.name}`}>View report<Icon name="arrow" size={14} /></a>}</li>;
+}
+
+function OverviewIncidentRow({ incident, campaignName }) {
+  const href = incidentReportHref({ campaignId: incident.campaignId || "", type: incidentType(incident.type), status: "OPEN" });
+  return <li className="overview-action-row overview-incident-row"><span className="overview-avatar overview-incident-avatar"><Icon name="warning" size={18} /></span><div className="overview-row-copy"><a href={href}>{campaignName || "Landing page issue"}</a><div className="overview-row-meta"><span>{incidentTypeLabel(incident.type)}</span><span className="overview-incident-label">Open incident</span></div></div><a className="button overview-row-action overview-review-issue" href={href} aria-label={`Review ${incidentTypeLabel(incident.type).toLowerCase()}${campaignName ? ` for ${campaignName}` : ""}`}>Review issue<Icon name="arrow" size={14} /></a></li>;
+}
+
+function OverviewWatchRow({ item, incident }) {
+  const checked = Boolean(item.lastMonitoringAt);
+  const checkedToday = checked && new Date(item.lastMonitoringAt).toDateString() === new Date().toDateString();
+  const href = incident ? incidentReportHref({ campaignId: item.campaign.id, status: "OPEN" }) : `#/site-watch?campaign=${encodeURIComponent(item.campaign.id)}`;
+  return <li><a className="overview-watch-row" href={href}><span className={`overview-watch-icon ${incident ? "has-incident" : checked ? "is-checked" : ""}`}><Icon name={incident ? "warning" : checked ? "check" : "clock"} size={17} /></span><span className="overview-watch-copy"><strong>{item.campaign.name}</strong><small className={incident ? "has-incident" : ""}>{incident ? "Needs attention" : checked ? <>Last checked <time dateTime={item.lastMonitoringAt}>{formatDate(item.lastMonitoringAt, { dateStyle: checkedToday ? undefined : "medium", timeStyle: "short" })}</time></> : "Waiting for first check"}</small></span><Icon name="chevron" size={14} /></a></li>;
 }
 
 function campaignObjective(value) {
@@ -591,7 +697,7 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
   const rows = accountCampaigns.filter((item) => {
     if (!`${item.campaign?.name || ""} ${campaignObjective(item.campaign?.objective)}`.toLowerCase().includes(search.toLowerCase().trim())) return false;
     const phase = campaignPhase(item.campaign);
-    if (filter === "Before launch") return phase !== "Live";
+    if (filter === "Not running") return phase !== "Live";
     if (filter === "Live") return phase === "Live";
     return true;
   });
@@ -607,16 +713,16 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
       <option value="">Select an ad account</option>
       {accounts.length > 1 && <option value="__all__">All ad accounts</option>}
       {accounts.map((account) => <option key={account.id} value={account.externalId}>{account.name} ({account.externalId.replace(/^act_/, "")})</option>)}
-    </select></label>}<Button kind="primary" icon="refresh" onClick={syncMeta} disabled={!meta.connection || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : "Sync campaigns"}</Button></div>}>Every campaign, every destination. All in one clear view.</PageHeading>
+    </select></label>}<Button kind="primary" icon="refresh" onClick={syncMeta} disabled={!meta.connection || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : "Sync campaigns"}</Button></div>}>Published campaigns and their destinations, synced from Meta.</PageHeading>
     <div className="metrics-grid">
       <Metric label="Awaiting review" value={needsAttention} note="Ready for a fresh campaign check" tone="coral" />
-      <Metric label="Before launch" value={nonLive.length} note="Draft, paused, or scheduled campaigns" />
+      <Metric label="Not running" value={nonLive.length} note="Paused, scheduled, or otherwise inactive" />
       <Metric label="Currently live" value={accountCampaigns.length - nonLive.length} note="Active campaigns in this ad account" tone="green" />
     </div>
     <section className="panel table-panel">
-      <div className="table-toolbar"><div className="filter-tabs" role="group" aria-label="Filter campaigns">{["All campaigns", "Before launch", "Live"].map((name) => <button key={name} className={`filter-tab ${filter === name ? "selected" : ""}`} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}<span>{name === "All campaigns" ? accountCampaigns.length : name === "Before launch" ? nonLive.length : accountCampaigns.length - nonLive.length}</span></button>)}</div><label className="search-field"><Icon name="search" size={17} /><span className="sr-only">Search campaigns</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search campaigns…" /></label></div>
-      {busy === "meta-accounts" ? <div className="center-state inline campaign-loading" role="status" aria-live="polite"><div className="spinner" aria-hidden="true" /><p>Loading campaigns for the selected ad account…</p></div> : rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} /> : <Empty title={accountCampaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{accountCampaigns.length ? "Choose another campaign filter." : meta.connection ? (accounts.length && !accountFilter ? "Choose an ad account from the dropdown to sync and display its campaigns." : "No campaigns were returned for this ad account. Try syncing again or choose another account.") : "Connect Meta Ads to import real campaigns."}</Empty>}
-      <div className="table-footer"><span>{rows.length} campaign{rows.length === 1 ? "" : "s"}{search && ` matching “${search}”`}</span><span><Icon name="meta" size={15} /> Synced from Meta Ads</span></div>
+      <div className="table-toolbar"><div className="filter-tabs" role="group" aria-label="Filter campaigns">{["All campaigns", "Not running", "Live"].map((name) => <button key={name} className={`filter-tab ${filter === name ? "selected" : ""}`} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}<span>{name === "All campaigns" ? accountCampaigns.length : name === "Not running" ? nonLive.length : accountCampaigns.length - nonLive.length}</span></button>)}</div><label className="search-field"><Icon name="search" size={17} /><span className="sr-only">Search campaigns</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search campaigns…" /></label></div>
+      {busy === "meta-accounts" ? <div className="center-state inline campaign-loading" role="status" aria-live="polite"><div className="spinner" aria-hidden="true" /><p>Loading campaigns for the selected ad account…</p></div> : rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} /> : <Empty title={accountCampaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{accountCampaigns.length ? "Choose another campaign filter." : meta.connection ? (accounts.length && !accountFilter ? "Choose an ad account from the dropdown to sync and display its campaigns." : "No published campaigns were returned for this ad account. Publish a campaign with its switch off, then sync again, or choose another account.") : "Connect Meta Ads to import published campaigns."}</Empty>}
+      <div className="table-footer"><span>{rows.length} campaign{rows.length === 1 ? "" : "s"}{search && ` matching “${search}”`}</span><span><Icon name="meta" size={15} /> Published data from Meta Ads</span></div>
     </section>
   </>;
 }
@@ -634,7 +740,7 @@ function CampaignTable({ items, busy, runQa, monitorCampaign }) {
         <td>{formatDate(campaign.startAt, { dateStyle: "medium", timeStyle: undefined })}</td>
         <td><Status value={item.verdict || "UNKNOWN"} label={status} /></td>
         {monitorCampaign && <td><Button icon="watch" className={`monitor-button ${item.monitoringEnabled ? "is-on" : ""}`} disabled={busy === "monitor:" + campaign.id || (!item.monitoringEnabled && !item.monitoringAvailable)} onClick={() => monitorCampaign(campaign.id, !item.monitoringEnabled)} title={!item.monitoringEnabled && !item.monitoringAvailable ? "No ad destination is currently available. Sync this campaign from Meta first." : `${item.monitoringDestinationCount || 0} landing page destinations`}>{busy === "monitor:" + campaign.id ? "Updating…" : item.monitoringEnabled ? "Pause watch" : item.monitoringAvailable ? "Start watch" : "No destination"}</Button></td>}
-        <td className="action-cell">{item.lastQa && !["STALE", "Not checked"].includes(status) ? <Button className="row-action" onClick={() => navigate(`report/${campaign.id}`)}>View report<Icon name="arrow" size={14} /></Button> : <Button className="row-action" disabled={busy === `qa:${campaign.id}`} onClick={() => runQa(campaign.id)}>{busy === `qa:${campaign.id}` ? "Checking…" : "Run check"}<Icon name="arrow" size={14} /></Button>}</td>
+        <td className="action-cell">{item.lastQa && !["STALE", "Not checked"].includes(status) ? <Button className="row-action" onClick={() => navigate(`report/${campaign.id}`)}>View report<Icon name="arrow" size={14} /></Button> : <Button className="row-action run-check" disabled={busy === `qa:${campaign.id}`} onClick={() => runQa(campaign.id)}>{busy === `qa:${campaign.id}` ? "Checking…" : "Run check"}<Icon name="arrow" size={14} /></Button>}</td>
       </tr>;
     })}</tbody>
   </table></div>;
@@ -800,7 +906,7 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
       Review what needs attention, what passed, and the campaign details behind each check.
     </PageHeading>
     <div className={`report-summary ${statusTone(detail.summary.verdict || "UNKNOWN")}`}>
-      <div className="report-verdict"><div className="eyebrow">CAMPAIGN READINESS</div><Status value={detail.summary.verdict || "UNKNOWN"} label={friendlyStatus(detail.summary.verdict)} /><small>Based on the latest QA run</small></div>
+      <div className="report-verdict"><div className="eyebrow">CAMPAIGN READINESS</div><Status value={detail.summary.verdict || "UNKNOWN"} label={friendlyStatus(detail.summary.verdict)} /><small>Latest QA run of published Meta data</small></div>
       <div className="report-count"><strong>{actionCount}</strong><span>Need action</span></div>
       <div className="report-count"><strong>{reviewCount}</strong><span>Need your review</span></div>
       <div className="report-count"><strong>{passedCount}</strong><span>Checks passed</span></div>
@@ -1012,13 +1118,17 @@ function Finding({ result, evidence }) {
   </article>;
 }
 
-function SiteWatch({ data, busy, checkCampaign, monitorCampaign, actOnIncident }) {
+function SiteWatch({ data, selectedCampaignId, busy, checkCampaign, monitorCampaign, actOnIncident }) {
   const { campaigns = [], incidents = [] } = data;
   const monitored = campaigns.filter((item) => item.monitoringEnabled);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(selectedCampaignId || "");
   const [details, setDetails] = useState(null);
   const [detailError, setDetailError] = useState("");
   const selected = monitored.find((item) => item.campaign.id === selectedId) || null;
+  const incidentGroups = groupIncidents(incidents.filter((incident) => incident.campaignId === selected?.campaign.id));
+  useEffect(() => {
+    if (selectedCampaignId) setSelectedId(selectedCampaignId);
+  }, [selectedCampaignId]);
   useEffect(() => {
     if (!monitored.length) { setSelectedId(""); return; }
     if (!monitored.some((item) => item.campaign.id === selectedId)) setSelectedId(monitored[0].campaign.id);
@@ -1035,7 +1145,7 @@ function SiteWatch({ data, busy, checkCampaign, monitorCampaign, actOnIncident }
   }, [selected?.campaign.id, selected?.lastMonitoringAt, campaigns.length]);
   const activeIncidents = incidents.filter((incident) => incident.status === "OPEN");
   return <>
-    <PageHeading eyebrow="CONTINUOUS MONITORING" title="Always on watch" action={<span className="monitoring-label"><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "Checks every 60 seconds" : "No active watches"}</span>}>Keep a close eye on the pages your campaigns send people to.</PageHeading>
+    <PageHeading eyebrow="CONTINUOUS MONITORING" title="Always on watch" action={<div className="watch-heading-actions"><span className="monitoring-label"><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "Checks every 60 seconds" : "No active watches"}</span><a className="button secondary incident-report-link" href={incidentReportHref()}>Full incident report <Icon name="arrow" size={15} /></a></div>}>Keep a close eye on the pages your campaigns send people to.</PageHeading>
     <div className="metrics-grid">
       <Metric label="Campaigns monitored" value={data.dashboard?.monitoredCampaigns ?? monitored.length} note="The campaign is refreshed before every check" tone="green" />
       <Metric label="Active incidents" value={activeIncidents.length} note="Changes or availability issues needing review" tone={activeIncidents.length ? "coral" : ""} />
@@ -1058,23 +1168,108 @@ function SiteWatch({ data, busy, checkCampaign, monitorCampaign, actOnIncident }
           <div className="site-timing"><div><span>Last check</span><strong>{formatDate(selected.lastMonitoringAt)}</strong></div><div><span>Next scheduled</span><strong>{formatDate(selected.nextMonitoringAt)}</strong></div><div><span>Current destinations</span><strong>{selected.monitoringDestinationCount ?? 0}</strong></div></div>
           <div className="site-actions"><Button kind="primary" icon="refresh" disabled={busy === "campaign-monitor:" + selected.campaign.id} onClick={() => checkCampaign(selected.campaign.id)}>{busy === "campaign-monitor:" + selected.campaign.id ? "Checking campaign…" : "Check now"}</Button><Button icon="watch" disabled={busy === "monitor:" + selected.campaign.id} onClick={() => monitorCampaign(selected.campaign.id, false)}>Pause watch</Button></div>
           {detailError && <div className="alert error" role="alert">{detailError}</div>}
-          {details && <><section className="history-section"><div className="section-heading"><h3>Current ad destinations</h3><span>Refreshed from Meta for each check</span></div>
+          {details && <section className="history-section"><div className="section-heading"><h3>Current ad destinations</h3><span>Refreshed from Meta for each check</span></div>
             {details.destinations.length === 0 ? <Empty title="No current ad destinations">The latest Meta campaign data contains no destination URL to inspect.</Empty> : <div className="history-list">{details.destinations.map((destination) => {
               const latest = destination.latestSnapshot;
               const safeUrl = safeExternalUrl(destination.url);
               return <div key={destination.url} className="history-row destination-history-row"><span className={"history-mark " + (latest ? statusTone(latest.status) : "")} aria-hidden="true">{latest?.status === "PASS" ? "OK" : latest ? "!" : "-"}</span><div className="history-copy"><strong>{safeUrl ? <a href={safeUrl} target="_blank" rel="noreferrer">{destination.url}</a> : destination.url}</strong><small>{destination.ads?.length ? "Used by: " + destination.ads.join(", ") : "Current campaign destination"}</small><small>{latest ? latest.status + " | HTTP " + (latest.httpStatus || "?") + (latest.pageTitle ? " | " + latest.pageTitle : "") : "Not checked yet"}{latest?.errorCode ? " | " + latest.errorCode : ""}</small></div><time>{destination.lastCheckedAt ? formatDate(destination.lastCheckedAt) : (destination.snapshotCount || 0) + " checks"}</time></div>;
             })}</div>}
-          </section><section className="history-section"><div className="section-heading"><h3>Campaign incidents</h3><span>{details.incidents.length} total</span></div>
-            {details.incidents.length === 0 ? <p className="muted-copy">No incidents have been recorded for this campaign.</p> : <div className="incident-list">{details.incidents.map((incident) => <IncidentCard key={incident.id} incident={incident} actOnIncident={actOnIncident} busy={busy} />)}</div>}
-          </section></>}
+          </section>}
+          <section className="history-section"><div className="section-heading incident-section-heading"><h3>Campaign incidents <span className="count-label">{incidentGroups.length} type{incidentGroups.length === 1 ? "" : "s"}</span></h3><a className="text-link" href={incidentReportHref({ campaignId: selected.campaign.id })}>View full report <Icon name="arrow" size={14} /></a></div>
+            {incidentGroups.length === 0 ? <p className="muted-copy">No incidents have been recorded for this campaign.</p> : <><p className="incident-summary-note">One summary per incident type. Intentional settings apply across this campaign until reverted.</p><div className="incident-list">{incidentGroups.map((group) => <IncidentSummary key={group.type} group={group} campaignId={selected.campaign.id} actOnIncident={actOnIncident} busy={busy} />)}</div></>}
+          </section>
         </>}
       </section>
     </div>
   </>;
 }
 
-function IncidentCard({ incident, actOnIncident, busy }) {
-  return <article className="incident-card"><div className="incident-card-head"><strong>{incident.title}</strong><Status value={incident.status} /></div><p>{incident.type} · {incident.severity || "severity not specified"}</p><div className="incident-values"><span>Before: {valueText(incident.oldValue?.value ?? incident.oldValue)}</span><span>Observed: {valueText(incident.newValue?.value ?? incident.newValue)}</span></div><div className="incident-foot"><span>Last seen {formatDate(incident.lastSeenAt)}{incident.resolvedAt ? ` · Resolved ${formatDate(incident.resolvedAt)}` : ""}</span>{incident.status === "OPEN" && <span className="incident-buttons"><Button disabled={busy === `incident:${incident.id}`} onClick={() => actOnIncident(incident, "recheck")}>Recheck</Button><Button disabled={busy === `incident:${incident.id}`} onClick={() => actOnIncident(incident, "resolve")}>Request resolution</Button><Button disabled={busy === `incident:${incident.id}`} onClick={() => actOnIncident(incident, "mark-intentional")}>Mark intentional</Button></span>}</div></article>;
+function IncidentValues({ incident }) {
+  return <div className="incident-values"><span>Before: {incidentValueText(incident.oldValue)}</span><span>Observed: {incidentValueText(incident.newValue)}</span></div>;
+}
+
+function IncidentActions({ incident, actOnIncident, busy }) {
+  const intentional = incident.status === "INTENTIONAL";
+  return <span className="incident-buttons">
+    <Button disabled={Boolean(busy)} onClick={() => actOnIncident(incident, "recheck")}>Recheck</Button>
+    <Button disabled={Boolean(busy)} onClick={() => actOnIncident(incident, intentional ? "revert-intentional" : "mark-intentional")}>{intentional ? "Revert intentional" : "Mark intentional"}</Button>
+  </span>;
+}
+
+function IncidentSummary({ group, campaignId, actOnIncident, busy }) {
+  const incident = group.representative;
+  const url = safeExternalUrl(incident.evidenceJson?.url);
+  return <article className="incident-card incident-summary">
+    <div className="incident-card-head"><strong>{incidentTypeLabel(group.type)}</strong><Status value={group.openCount ? "OPEN" : group.intentionalCount ? "INTENTIONAL" : group.latest.status} label={group.openCount ? `${group.openCount} open` : undefined} /></div>
+    <p>{group.totalCount} incident{group.totalCount === 1 ? "" : "s"} recorded{group.pageCount ? ` · ${group.pageCount} ${group.openCount ? "affected" : "previously affected"} page${group.pageCount === 1 ? "" : "s"}` : ""}</p>
+    <IncidentValues incident={incident} />
+    {url && <a className="incident-page-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
+    {group.intentionalCount > 0 && !group.openCount && <p className="incident-intentional-note">Intentional for this campaign until reverted. Future incidents of this type will not open alerts.</p>}
+    <div className="incident-foot"><span>{group.openCount ? "Latest open observation" : "Last seen"}: {formatDate(incident.lastSeenAt)}</span><a className="text-link" href={incidentReportHref({ campaignId, type: group.type })}>Review incidents <Icon name="arrow" size={14} /></a><IncidentActions incident={incident} actOnIncident={actOnIncident} busy={busy} /></div>
+  </article>;
+}
+
+function IncidentReport({ data, route, busy, actOnIncident }) {
+  const { campaigns = [], incidents = [] } = data;
+  const campaignId = route.campaignId || "";
+  const type = route.type || "";
+  const status = route.status || "";
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [report, setReport] = useState({ path: "", loading: true, incidents: [], error: "" });
+  const params = new URLSearchParams();
+  if (campaignId) params.set("campaignId", campaignId);
+  if (type) params.set("type", type);
+  if (status) params.set("status", status);
+  const path = `/api/incidents/report${params.size ? `?${params}` : ""}`;
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setReport({ path, loading: true, incidents: [], error: "" });
+    request(path, { signal: controller.signal }).then((records) => {
+      if (active) setReport({ path, loading: false, incidents: records.slice(0, INCIDENT_REPORT_LIMIT), error: "" });
+    }).catch((error) => {
+      if (active) setReport({ path, loading: false, incidents: [], error: error.message });
+    });
+    return () => { active = false; controller.abort(); };
+  }, [path, incidents, refreshVersion]);
+  const loading = report.path !== path || report.loading;
+  const campaignNames = new Map(campaigns.map((item) => [item.campaign.id, item.campaign.name]));
+  for (const incident of incidents) {
+    if (incident.campaignId && !campaignNames.has(incident.campaignId)) campaignNames.set(incident.campaignId, `Campaign ${incident.campaignId.slice(0, 8)}`);
+  }
+  if (campaignId && !campaignNames.has(campaignId)) campaignNames.set(campaignId, `Campaign ${campaignId.slice(0, 8)}`);
+  const types = new Set([...Object.keys(INCIDENT_TYPES), ...incidents.map((incident) => incidentType(incident.type))]);
+  if (type) types.add(type);
+  const changeFilter = (name, value) => {
+    window.location.hash = incidentReportHref({ campaignId, type, status, [name]: value });
+  };
+  return <>
+    <PageHeading eyebrow="MONITORING HISTORY" title="Incident report" action={<a className="button secondary incident-report-link" href="#/site-watch"><Icon name="watch" size={16} />Campaign watch</a>}>Review up to {INCIDENT_REPORT_LIMIT} recent incidents, including open issues, recoveries, and intentional changes.</PageHeading>
+    <section className="panel incident-report-panel">
+      <div className="panel-heading"><div><h2>Recent incidents</h2><p>Filters search your full history. Up to {INCIDENT_REPORT_LIMIT} matches are shown, most recently seen first.</p></div><Button icon="refresh" disabled={loading || Boolean(busy)} onClick={() => setRefreshVersion((version) => version + 1)}>Refresh</Button></div>
+      <div className="incident-report-filters">
+        <div className="incident-report-filter"><label htmlFor="incident-campaign">Campaign</label><select id="incident-campaign" value={campaignId} onChange={(event) => changeFilter("campaignId", event.target.value)}><option value="">All campaigns and pages</option>{[...campaignNames].map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></div>
+        <div className="incident-report-filter"><label htmlFor="incident-type">Incident type</label><select id="incident-type" value={type} onChange={(event) => changeFilter("type", event.target.value)}><option value="">All incident types</option>{[...types].map((value) => <option key={value} value={value}>{incidentTypeLabel(value)}</option>)}</select></div>
+        <div className="incident-report-filter"><label htmlFor="incident-status">Status</label><select id="incident-status" value={status} onChange={(event) => changeFilter("status", event.target.value)}><option value="">All statuses</option><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option><option value="INTENTIONAL">Intentional</option><option value="REVERTED">Reverted</option></select></div>
+      </div>
+      <p className="incident-report-caption" role="status">{loading ? "Loading incidents…" : report.error ? "The incident report could not be loaded." : `Showing ${report.incidents.length}${report.incidents.length === INCIDENT_REPORT_LIMIT ? ` most recent` : ""} incident${report.incidents.length === 1 ? "" : "s"}.`}{!loading && (campaignId || type || status) && <a className="text-link" href={incidentReportHref()}>Clear filters</a>}</p>
+      {loading ? <div className="center-state inline"><div className="spinner" /><p>Loading incident details…</p></div> : report.error ? <div className="alert error" role="alert"><span>{report.error}</span><Button onClick={() => setRefreshVersion((version) => version + 1)}>Try again</Button></div> : report.incidents.length === 0 ? <Empty title="No matching incidents">Choose another filter or check back after the next monitoring run.</Empty> : <div className="incident-list">{report.incidents.map((incident) => <IncidentCard key={incident.id} incident={incident} campaignName={incident.campaignId ? campaignNames.get(incident.campaignId) || "Campaign unavailable" : "Standalone page"} actOnIncident={actOnIncident} busy={busy} />)}</div>}
+    </section>
+  </>;
+}
+
+function IncidentCard({ incident, campaignName, actOnIncident, busy }) {
+  const url = safeExternalUrl(incident.evidenceJson?.url);
+  return <article className="incident-card incident-report-card">
+    <div className="incident-card-head"><strong>{incident.title || incidentTypeLabel(incident.type)}</strong><Status value={incident.status} /></div>
+    <p>{campaignName} · {incident.severity || "Severity not specified"}</p>
+    {url && <a className="incident-page-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
+    {incident.type?.startsWith("claim:") && <p>Watched claim: {incident.type.slice(6)}</p>}
+    <IncidentValues incident={incident} />
+    {incident.status === "INTENTIONAL" && <p className="incident-intentional-note">Intentional for this {incident.campaignId ? "campaign" : "page"} until reverted. Applies to all future incidents of this type.</p>}
+    <div className="incident-foot"><span>First seen {formatDate(incident.firstSeenAt)} · Last seen {formatDate(incident.lastSeenAt)}{incident.resolvedAt ? ` · ${incident.status === "INTENTIONAL" ? "Marked intentional" : incident.status === "REVERTED" ? "Reverted" : "Resolved"} ${formatDate(incident.resolvedAt)}` : ""}</span><IncidentActions incident={incident} actOnIncident={actOnIncident} busy={busy} /></div>
+    {incident.resolutionNote && <p className="incident-resolution-note">{incident.resolutionNote}</p>}
+  </article>;
 }
 
 function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
@@ -1116,7 +1311,7 @@ function WebsiteRouter() {
     return () => window.removeEventListener("hashchange", updateRoute);
   }, []);
   useEffect(() => {
-    const titles = { home: "SteadySignal — Keep the promise behind every click", login: "Log in — SteadySignal", signup: "Create your workspace — SteadySignal", overview: "Campaign overview — SteadySignal", campaigns: "Your campaigns — SteadySignal", "site-watch": "Campaign watch — SteadySignal", settings: "Workspace settings — SteadySignal", report: "Campaign QA report — SteadySignal" };
+    const titles = { home: "SteadySignal — Keep the promise behind every click", login: "Log in — SteadySignal", signup: "Create your workspace — SteadySignal", overview: "Campaign overview — SteadySignal", campaigns: "Your campaigns — SteadySignal", "site-watch": "Campaign watch — SteadySignal", incidents: "Incident report — SteadySignal", settings: "Workspace settings — SteadySignal", report: "Campaign QA report — SteadySignal" };
     document.title = titles[route.page];
     const anchor = route.page === "home" ? document.getElementById(window.location.hash.slice(1)) : null;
     if (anchor) anchor.scrollIntoView();

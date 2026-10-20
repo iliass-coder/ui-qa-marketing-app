@@ -5,9 +5,10 @@ export function campaignIsLive(campaign, now = Date.now()) {
 }
 
 export function campaignPhase(campaign, now = Date.now()) {
+  const status = String(campaign?.status || "").toUpperCase();
   if (campaignIsLive(campaign, now)) return "Live";
-  if (campaign?.startAt && new Date(campaign.startAt).getTime() > now) return "Scheduled";
-  return "Draft / paused";
+  if (status === "ACTIVE" && campaign?.startAt && new Date(campaign.startAt).getTime() > now) return "Scheduled";
+  return ({ PAUSED: "Paused", ARCHIVED: "Archived", DELETED: "Deleted", IN_PROCESS: "Processing", WITH_ISSUES: "Needs attention" })[status] || "Unknown";
 }
 
 export function statusTone(status) {

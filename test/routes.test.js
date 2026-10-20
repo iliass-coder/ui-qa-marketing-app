@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveRoute } from "../src/routes.js";
+import { incidentReportHref } from "../src/incidents.js";
 
 test("the public home and section anchors stay on the landing page", () => {
   for (const hash of ["", "#/", "#product", "#how-it-works", "#questions"]) {
@@ -19,4 +20,11 @@ test("authentication callbacks reach the auth screen even when returning to the 
   assert.deepEqual(resolveRoute("", "?email_verified=success"), { page: "login" });
   assert.deepEqual(resolveRoute("#/overview", "?sso_error=no_account"), { page: "login" });
   assert.deepEqual(resolveRoute("", "?utm_source=meta"), { page: "home" });
+});
+
+test("incident reports support direct links and preserve campaign, type, and status filters", () => {
+  assert.deepEqual(resolveRoute(incidentReportHref()), { page: "incidents" });
+  const filters = { campaignId: "campaign-42", type: "claim:Free shipping & returns", status: "OPEN" };
+  assert.deepEqual(resolveRoute(incidentReportHref(filters)), { page: "incidents", ...filters });
+  assert.deepEqual(resolveRoute(incidentReportHref({ campaignId: "campaign-42", type: "claims" })), { page: "incidents", campaignId: "campaign-42", type: "claims" });
 });
