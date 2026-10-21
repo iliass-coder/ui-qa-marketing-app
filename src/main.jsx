@@ -4,7 +4,10 @@ import { campaignPhase, formatDate, statusTone, valueText } from "./domain.js";
 import { Icon } from "./icons.jsx";
 import { Brand } from "./Brand.jsx";
 import { LandingPage } from "./LandingPage.jsx";
+import { AccountSettings, MetaConnectionNotice, RecoveryPage } from "./AccountAccess.jsx";
+import { BillingPage, BillingNotice } from "./Billing.jsx";
 import { resolveRoute } from "./routes.js";
+import { watchSessionActivity } from "./session.js";
 import { INCIDENT_REPORT_LIMIT, INCIDENT_TYPES, groupIncidents, incidentReportHref, incidentType, incidentTypeLabel, incidentValueText } from "./incidents.js";
 import "./styles.css";
 import "./overview.css";
@@ -20,13 +23,25 @@ const request = async (path, options = {}) => {
   const response = await fetch(path, { ...options, method, headers, credentials: "same-origin" });
   if (!response.ok) {
     let detail = "";
+    let fallbackDetail = "";
     try {
       const body = await response.json();
-      detail = body.message || body.code || "";
+      detail = body.code || body.message || "";
+      fallbackDetail = body.message || "";
     } catch {
       detail = "";
     }
+    const errorCode = detail;
     detail = ({
+      ANALYSIS_LIMIT_REACHED: "This campaign needs more analyses than you have available. Review Plan & usage to upgrade or add analyses.",
+      MONITORED_PAGE_LIMIT_REACHED: "This watch would exceed your landing-page allowance. Free a slot or upgrade in Plan & usage.",
+      AD_ACCOUNT_LIMIT_REACHED: "Your plan does not cover this many Meta accounts. Select fewer accounts or upgrade in Plan & usage.",
+      TRIAL_EXPIRED: "Your monitoring trial has ended. Choose a plan in Plan & usage to resume your watches.",
+      MONITORING_NOT_ENABLED: "Start a watch for this campaign before requesting a monitoring recheck.",
+      BILLING_NOT_CONFIGURED: "Paid checkout is not available yet. Contact your workspace administrator.",
+      STRIPE_REQUEST_FAILED: "Stripe could not complete this request. Try again or contact your workspace administrator.",
+      STRIPE_UNAVAILABLE: "Stripe is temporarily unavailable. Your current plan has not changed; try again shortly.",
+      SUBSCRIPTION_REQUIRED: "Choose a paid plan before purchasing additional analyses.",
       INTENTIONAL_SETTING_NOT_ACTIVE: "This incident type is already using normal monitoring. Refresh to see its current status.",
       META_ADS_MANAGEMENT_REQUIRED: "Reconnect Meta Ads and grant the ads_management permission to enable automatic pausing.",
       META_PERMISSION_DENIED: "Meta did not grant the permission required to pause campaigns. Reconnect Meta Ads and approve the requested access.",
@@ -35,9 +50,20 @@ const request = async (path, options = {}) => {
       EMAIL_NOT_VERIFIED: "Verify your email using the link we sent before signing in.",
       EMAIL_ALREADY_REGISTERED: "An account already uses this email. Sign in instead.",
       GOOGLE_NOT_CONFIGURED: "Google sign-in is not configured on the backend yet.",
+      ACCOUNT_RECOVERY_NOT_CONFIGURED: "Recovery email is currently unavailable. Contact your workspace administrator.",
+      INVALID_OR_EXPIRED_RESET: "This password reset link is invalid, expired, or already used. Request a new link.",
+      INVALID_OR_EXPIRED_DELETION: "This deletion link is invalid, expired, or already used. Request a new confirmation email in settings.",
+      CURRENT_PASSWORD_INCORRECT: "Your current password was not accepted.",
+      PASSWORD_NOT_SET: "Use a password setup email to add a password to your account.",
+      PASSWORD_UNCHANGED: "Choose a password different from your current password.",
+      PASSWORD_POLICY: "Use a password with 16 to 200 characters.",
+      META_TOKEN_EXPIRED: "Meta access has expired. Reconnect Meta Ads in settings.",
+      META_RECONNECT_REQUIRED: "Reconnect Meta Ads in settings to restore access.",
+      RATE_LIMITED: "Too many requests. Wait a minute and try again.",
       GOOGLE_ACCOUNT_NOT_AUTHORIZED: "No account uses that Google email yet. Switch to sign up to create a workspace."
-    })[detail] || detail;
+    })[detail] || fallbackDetail || detail;
     const error = new Error(detail || `Request failed (${response.status})`);
+    error.code = errorCode;
     error.status = response.status;
     throw error;
   }
@@ -111,6 +137,7 @@ function App() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [emailSignupEnabled, setEmailSignupEnabled] = useState(false);
+  const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(null);
   const [authMode, setAuthMode] = useState(() => routeFromHash().page === "signup" ? "signup" : "signin");
   const [signupWorkspaceName, setSignupWorkspaceName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
@@ -119,21 +146,38 @@ function App() {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState("");
+  const [qaConfirmation, setQaConfirmation] = useState(null);
   const [incidentDecision, setIncidentDecision] = useState(null);
   const [toast, setToast] = useState("");
+  const authGeneration = useRef(0);
+  const intentHandled = useRef(false);
+  useEffect(() => {
+    if (route.plan) { try { window.sessionStorage.setItem("steadysignal_plan", route.plan); } catch {} }
+    if (auth === "signed-in" && data && !intentHandled.current && ["overview", "login", "signup"].includes(route.page)) {
+      let intent = route.plan; try { intent ||= window.sessionStorage.getItem("steadysignal_plan"); } catch {}
+      intentHandled.current = true;
+      if (["STARTER", "GROWTH", "AGENCY"].includes(intent)) {
+        try { window.sessionStorage.removeItem("steadysignal_plan"); } catch {}
+        navigate(`billing?plan=${intent}`);
+      }
+    }
+  }, [route.plan, route.page, auth, data]);
 
   const loadApp = useCallback(async () => {
+    const generation = authGeneration.current;
     setLoadError("");
-    const [me, dashboard, meta, campaigns, incidents, preferences] = await Promise.all([
+    const [me, dashboard, meta, campaigns, incidents, preferences, billing] = await Promise.all([
       request("/api/me"),
       request("/api/dashboard"),
       request("/api/integrations/meta/status"),
       request("/api/campaigns"),
       request("/api/incidents"),
-      request("/api/notification-preferences")
+      request("/api/notification-preferences"),
+      request("/api/billing")
     ]);
+    if (generation !== authGeneration.current) return;
     setUser(me);
-    setData({ dashboard, meta, campaigns, incidents, preferences });
+    setData({ dashboard, meta, campaigns, incidents, preferences, billing });
     setAuth("signed-in");
   }, []);
 
@@ -150,8 +194,9 @@ function App() {
       .then((result) => {
         setGoogleEnabled(Boolean(result.enabled));
         setEmailSignupEnabled(Boolean(result.emailSignupEnabled));
+        setPasswordRecoveryEnabled(Boolean(result.passwordRecoveryEnabled));
       })
-      .catch(() => setGoogleEnabled(false));
+      .catch(() => { setGoogleEnabled(false); setPasswordRecoveryEnabled(false); });
     request("/api/me").then((me) => {
       setUser(me);
       setAuth("signed-in");
@@ -169,6 +214,18 @@ function App() {
     if (auth !== "signed-in") return;
     loadApp().catch((error) => setLoadError(error.message));
   }, [auth, loadApp]);
+
+  useEffect(() => {
+    if (auth !== "signed-in") return undefined;
+    const refreshConnection = () => {
+      if (document.visibilityState === "hidden") return;
+      request("/api/billing").then((billing) => setData((current) => current ? { ...current, billing } : current)).catch(() => {});
+      request("/api/integrations/meta/status").then((meta) => setData((current) => current ? { ...current, meta } : current)).catch(() => {});
+    };
+    const timer = window.setInterval(refreshConnection, 60000);
+    window.addEventListener("focus", refreshConnection);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshConnection); };
+  }, [auth]);
 
   useEffect(() => {
     if (route.page === "login" || route.page === "signup") {
@@ -221,8 +278,8 @@ function App() {
         setAuth("signed-in");
       }
     } catch (error) {
-      setCanResendVerification(error.message === "EMAIL_NOT_VERIFIED");
-      setLoginError(error.message === "INVALID_CREDENTIALS" ? "Email or password was not accepted." : error.message);
+      setCanResendVerification(error.code === "EMAIL_NOT_VERIFIED");
+      setLoginError(error.code === "INVALID_CREDENTIALS" ? "Email or password was not accepted." : error.message);
     } finally {
       setLoginBusy(false);
     }
@@ -256,12 +313,14 @@ function App() {
     setLoadError("");
     try {
       await request("/api/auth/logout", { method: "POST" });
+      authGeneration.current += 1;
       setUser(null);
       setData(null);
       setAuth("signed-out");
       navigate("login");
     } catch (error) {
       if (error.status === 401) {
+        authGeneration.current += 1;
         setUser(null);
         setData(null);
         setAuth("signed-out");
@@ -274,7 +333,36 @@ function App() {
     }
   };
 
+  const accountSignedOut = useCallback((notice) => {
+    authGeneration.current += 1;
+    setUser(null);
+    setData(null);
+    setAuth("signed-out");
+    setLoadError("");
+    setLoginError("");
+    setLoginNotice(notice);
+    navigate("login");
+  }, []);
+
+  useEffect(() => {
+    if (auth !== "signed-in") return undefined;
+    const generation = authGeneration.current;
+    return watchSessionActivity({
+      renew: (signal) => request("/api/auth/activity", { method: "POST", signal }),
+      onExpired: () => {
+        if (generation === authGeneration.current) accountSignedOut("Your session expired. Sign in again.");
+      }
+    });
+  }, [auth, accountSignedOut]);
+
   const runQa = async (campaignId) => {
+    setBusy(`estimate:${campaignId}`); setLoadError("");
+    try { const estimate = await request(`/api/campaigns/${campaignId}/qa-estimate`); setQaConfirmation({ campaignId, ...estimate }); }
+    catch (error) { setLoadError(error.message); }
+    finally { setBusy(""); }
+  };
+
+  const executeQa = async (campaignId) => {
     setBusy(`qa:${campaignId}`);
     setLoadError("");
     try {
@@ -395,6 +483,9 @@ function App() {
         method: "POST",
         ...(action === "mark-intentional" ? { body: { note: "Marked intentional until explicitly reverted by a workspace member." } } : {})
       });
+      if (action === "revert-intentional" && result?.recheckQueued === false) {
+        await reload(); setToast("Intentional setting reverted. Resume monitoring coverage to request a fresh inspection."); return;
+      }
       if (action === "revert-intentional") {
         reverted = true;
         await reload();
@@ -434,12 +525,16 @@ function App() {
   };
 
   if (auth === "loading") return <main className="center-state"><div className="spinner" /><p>Checking your secure session…</p></main>;
+  if (["forgot-password", "reset-password"].includes(route.page) || (route.page === "delete-account" && auth === "signed-in")) {
+    return <RecoveryPage key={`${route.page}:${route.token || ""}`} mode={route.page} token={route.token} request={request} enabled={passwordRecoveryEnabled} account={user} onSignedOut={accountSignedOut} />;
+  }
   if (auth === "signed-out") {
     return <main className="login-page"><aside className="login-story"><a href="/" className="login-brand" aria-label="SteadySignal home"><Brand /></a><div className="login-story-copy"><div className="health-kicker">A CLEARER SIGNAL</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>SteadySignal</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Thoughtful checks. Steadier campaigns.</div></aside><div className="login-form-region"><section className="login-card">
-      <div className="eyebrow">YOUR CAMPAIGN WORKSPACE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Create a workspace for campaigns you can feel confident about." : "Sign in and see how your campaigns are doing."}</p>
+      <div className="eyebrow">YOUR CAMPAIGN WORKSPACE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start with 10 ad analyses and a 14-day monitoring preview. No credit card required." : "Sign in and see how your campaigns are doing."}</p>
       {loadError && <div className="alert error" role="alert">{loadError} Check that the backend is running, then try again.</div>}
       {loginError && <div className="alert error" role="alert">{loginError}</div>}
       {loginNotice && <div className="alert success" role="status">{loginNotice}</div>}
+      {route.page === "delete-account" && <div className="alert" role="status">Sign in to the account you requested to delete. If you use Google, reopen the link in your deletion email after signing in.</div>}
       {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your workspace." : "Email registration is currently unavailable. Contact your workspace administrator."}</div>}
       {googleEnabled && <>
         <Button type="button" className="google-button" disabled={!googleEnabled || (authMode === "signup" && !signupWorkspaceName.trim())} onClick={startGoogleAuth} title={!googleEnabled ? "Google sign-in is not configured" : undefined}>
@@ -459,6 +554,7 @@ function App() {
         <Button kind="primary" type="submit" disabled={loginBusy || (authMode === "signup" && !emailSignupEnabled)}>{loginBusy ? (authMode === "signup" ? "Creating account…" : "Signing in…") : (authMode === "signup" ? "Create account" : "Sign in")}</Button>
       </form><p className="fine-print"><Icon name="shield" size={13} />{authMode === "signup" ? "Use at least 16 characters. We'll verify your email." : "A secure space for your campaign work."}</p>
       {authMode === "signin" && canResendVerification && <Button type="button" className="resend-verification" disabled={loginBusy || !authEmail.trim()} onClick={resendVerification}>Resend verification email</Button>}
+      {authMode === "signin" && <p className="forgot-password-link"><a className="text-link" href="#/forgot-password">Forgot password?</a></p>}
       <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to SteadySignal?"} <a className="text-button" href={authMode === "signup" ? "#/login" : "#/signup"} onClick={() => setLoginError("")}>{authMode === "signup" ? "Sign in" : "Create an account"}</a></p>
     </section><p className="login-form-foot">SteadySignal · Campaign assurance, made clear.</p></div></main>;
   }
@@ -472,6 +568,7 @@ function App() {
   const activeNav = route.page === "report" ? "campaigns" : route.page;
 
   return <div className="app-shell">
+    {qaConfirmation && <AnalysisConfirmation estimate={qaConfirmation} onCancel={() => setQaConfirmation(null)} onConfirm={() => { const id = qaConfirmation.campaignId; setQaConfirmation(null); executeQa(id); }} />}
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
     <aside className="sidebar">
       <a href="#/overview" className="brand-link" aria-label="SteadySignal overview"><Brand /></a>
@@ -482,6 +579,7 @@ function App() {
         <NavItem id="campaigns" active={activeNav === "campaigns"} icon="campaigns" label="Campaigns" count={data.campaigns.length} />
         <NavItem id="site-watch" active={activeNav === "site-watch"} icon="watch" label="Campaign watch" count={data.campaigns.filter((item) => item.monitoringEnabled).length} />
         <NavItem id="incidents" active={activeNav === "incidents"} icon="warning" label="Incident report" />
+        <NavItem id="billing" active={activeNav === "billing"} icon="shield" label="Plan & usage" />
         <NavItem id="settings" active={activeNav === "settings"} icon="settings" label="Settings" />
       </nav>
       <div className="sidebar-account">
@@ -498,16 +596,20 @@ function App() {
         <div className="topbar-right"><span className="workspace-date"><Icon name="calendar" size={15} />{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date())}</span><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta connected" : "Meta disconnected"} /><button className="icon-button mobile-signout" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={17} /></button></div>
       </header>
       <div className={`page-content page-${route.page}`} id="main-content" tabIndex="-1">
-        {!connected && <div className="alert connection-alert" role="status"><div><strong>Meta account disconnected</strong><span>Connect Meta to import real campaigns and run prelaunch QA.</span></div><Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
+        {!connection && <div className="alert connection-alert" role="status"><div><strong>Meta account disconnected</strong><span>Connect Meta to import real campaigns and run prelaunch QA.</span></div><Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
+        <BillingNotice billing={data.billing} />
+        <MetaConnectionNotice meta={data.meta} />
+        {route.metaError === "denied" && <div className="alert" role="status">Meta authorization was not completed. Choose Reconnect when you are ready to grant access.</div>}
         {connection?.lastError && <div className="alert error" role="alert">Meta reports: {connection.lastError}. Reconnect or review the account configuration.</div>}
         {metaSyncIsStale && <div className="alert stale-alert" role="status">Meta campaign data was last synced {formatDate(connection.lastSyncAt)}. Sync now before relying on campaign status.</div>}
         {loadError && <div className="alert error" role="alert"><span>{loadError}</span><button className="alert-close" aria-label="Dismiss error" onClick={() => setLoadError("")}>×</button></div>}
+        {route.page === "billing" && <BillingPage billing={data.billing} request={request} reload={reload} route={route} />}
         {route.page === "overview" && <Overview data={data} busy={busy} runQa={runQa} syncMeta={syncMeta} />}
         {route.page === "campaigns" && <Campaigns data={data} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} syncMeta={syncMeta} selectMetaAccounts={saveMetaAccounts} />}
         {route.page === "report" && <QaReport campaignId={route.id} refreshKey={data.campaigns?.find((item) => item.campaign?.id === route.id)?.lastQa?.id || ""} runQa={runQa} busy={busy} />}
         {route.page === "site-watch" && <SiteWatch data={data} selectedCampaignId={route.campaignId} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
         {route.page === "incidents" && <IncidentReport data={data} route={route} busy={busy} actOnIncident={actOnIncident} />}
-        {route.page === "settings" && <Settings data={data} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} />}
+        {route.page === "settings" && <Settings data={data} account={user} onSignedOut={accountSignedOut} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} />}
       </div>
       <footer className="workspace-footer"><span>SteadySignal <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
       {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast("")} aria-label="Dismiss notification">×</button></div>}
@@ -610,7 +712,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
     <section className="overview-metrics" aria-label="Workspace summary">
       <OverviewMetric label="Campaigns" value={campaigns.length} note={selectedAccounts ? `Across ${selectedAccounts} ad account${selectedAccounts === 1 ? "" : "s"}` : "Your imported campaigns"} icon="campaigns" tone="total" href="#/campaigns" />
       <OverviewMetric label="To review" value={needsReview.length} note="Before your next launch" icon="shield" tone={needsReview.length ? "review" : ""} onClick={() => selectFilter("qa", true)} />
-      <OverviewMetric label="On watch" value={monitored.length} note="Checked every minute" icon="watch" tone="watch" href="#/site-watch" />
+      <OverviewMetric label="Watches enabled" value={monitored.length} note={data.billing.monitoringActive ? `${data.billing.monitoringIntervalMinutes}-minute schedule` : "Coverage paused ? review your plan"} icon="watch" tone="watch" href="#/site-watch" />
       <OverviewMetric label="Open incidents" value={openIncidents.length} note={openIncidents.length ? "Landing-page issues to review" : "No open issues"} icon="warning" tone={openIncidents.length ? "incident" : ""} onClick={() => selectFilter("incident", true)} />
     </section>
 
@@ -634,7 +736,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
       <section className="overview-panel overview-monitoring" aria-labelledby="overview-watch-title">
         <div className="overview-panel-heading"><div><h2 id="overview-watch-title">Campaign watch</h2><p>Landing pages, checked around the clock.</p></div><span className={`overview-live ${monitored.length ? "is-live" : ""}`}><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "Live" : "Inactive"}</span></div>
         <div className="overview-coverage"><div><span>Monitoring coverage</span><strong>{coverage}<span>%</span></strong></div><div className="overview-coverage-track" role="meter" aria-label="Campaigns on watch" aria-valuenow={monitored.length} aria-valuemin={0} aria-valuemax={campaigns.length || 1} aria-valuetext={`${monitored.length} of ${campaigns.length} campaigns on watch`}><span style={{ width: `${coverage}%` }} /></div><p><strong>{monitored.length}</strong> of {campaigns.length} campaigns on watch</p></div>
-        {monitored.length ? <ul className="overview-watch-list">{watchPreview.map((item) => <OverviewWatchRow key={item.campaign.id} item={item} incident={incidentsByCampaign.get(item.campaign.id)} />)}</ul> : <div className="overview-empty overview-watch-empty"><span><Icon name="watch" size={24} /></span><h3>Start your first watch</h3><p>Monitor a campaign to check its landing pages every minute.</p><a className="text-link" href="#/campaigns">Choose campaigns <Icon name="arrow" size={15} /></a></div>}
+        {monitored.length ? <ul className="overview-watch-list">{watchPreview.map((item) => <OverviewWatchRow key={item.campaign.id} item={item} incident={incidentsByCampaign.get(item.campaign.id)} />)}</ul> : <div className="overview-empty overview-watch-empty"><span><Icon name="watch" size={24} /></span><h3>Start your first watch</h3><p>Monitor a campaign to check its landing pages on your plan's schedule.</p><a className="text-link" href="#/campaigns">Choose campaigns <Icon name="arrow" size={15} /></a></div>}
         <div className="overview-panel-footer"><span><Icon name="clock" size={13} /> Every 60 seconds</span><a className="text-link" href="#/site-watch">{monitored.length > watchPreview.length ? `View all ${monitored.length}` : "Manage watch"}<Icon name="arrow" size={14} /></a></div>
       </section>
     </div>
@@ -685,8 +787,9 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
   const selectedAccounts = accounts.filter((account) => account.selected);
   const [accountFilter, setAccountFilter] = useState("");
   useEffect(() => {
-    if (selectedAccounts.length === accounts.length && accounts.length > 1) setAccountFilter("__all__");
-    else setAccountFilter(selectedAccounts[0]?.externalId || "");
+    setAccountFilter((current) => current === "__all__" && selectedAccounts.length > 1 ? current
+      : selectedAccounts.some((account) => account.externalId === current) ? current
+      : selectedAccounts.length > 1 ? "__all__" : selectedAccounts[0]?.externalId || "");
   }, [meta.accounts]);
   const activeAccount = accounts.find((account) => account.externalId === accountFilter);
   const accountCampaigns = accountFilter === "__all__"
@@ -706,14 +809,15 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
   const changeAccount = (event) => {
     const value = event.target.value;
     setAccountFilter(value);
-    selectMetaAccounts(value === "__all__" ? accounts.map((account) => account.externalId) : value ? [value] : []);
+
   };
   return <>
-    <PageHeading eyebrow="CAMPAIGN LIBRARY" title="Your campaigns" action={<div className="campaign-heading-actions">{accounts.length > 0 && <label className="account-filter-label"><span className="sr-only">Ad account</span><select value={accountFilter} onChange={changeAccount} disabled={busy === "sync" || busy === "meta-accounts"}>
+    <PageHeading eyebrow="CAMPAIGN LIBRARY" title="Your campaigns" action={<div className="campaign-heading-actions">{selectedAccounts.length > 0 && <label className="account-filter-label"><span className="sr-only">Ad account</span><select value={accountFilter} onChange={changeAccount} disabled={busy === "sync" || busy === "meta-accounts"}>
       <option value="">Select an ad account</option>
-      {accounts.length > 1 && <option value="__all__">All ad accounts</option>}
-      {accounts.map((account) => <option key={account.id} value={account.externalId}>{account.name} ({account.externalId.replace(/^act_/, "")})</option>)}
+      {accounts.length > 1 && <option value="__all__">All selected accounts</option>}
+      {selectedAccounts.map((account) => <option key={account.id} value={account.externalId}>{account.name} ({account.externalId.replace(/^act_/, "")})</option>)}
     </select></label>}<Button kind="primary" icon="refresh" onClick={syncMeta} disabled={!meta.connection || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : "Sync campaigns"}</Button></div>}>Published campaigns and their destinations, synced from Meta.</PageHeading>
+    {accounts.length > 0 && <details className="panel billing-account-picker" open={selectedAccounts.length === 0 ? true : undefined}><summary>Choose accounts to sync <span>{selectedAccounts.length} / {data.billing.adAccounts.limit} selected</span></summary><p>Your plan covers {data.billing.adAccounts.limit} Meta accounts. Allowances are shared across your workspace.</p><div>{accounts.map((a) => <label key={a.id}><input type="checkbox" checked={a.selected} disabled={busy === "meta-accounts" || busy === "sync" || (!a.selected && selectedAccounts.length >= data.billing.adAccounts.limit)} onChange={() => selectMetaAccounts(a.selected ? selectedAccounts.filter((selected) => selected.id !== a.id).map((selected) => selected.externalId) : [...selectedAccounts.map((selected) => selected.externalId), a.externalId])} /><span>{a.name}<small>{a.externalId}</small></span></label>)}</div><a className="text-link" href="#/billing">Review account allowance <Icon name="arrow" size={14} /></a></details>}
     <div className="metrics-grid">
       <Metric label="Awaiting review" value={needsAttention} note="Ready for a fresh campaign check" tone="coral" />
       <Metric label="Not running" value={nonLive.length} note="Paused, scheduled, or otherwise inactive" />
@@ -721,7 +825,7 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
     </div>
     <section className="panel table-panel">
       <div className="table-toolbar"><div className="filter-tabs" role="group" aria-label="Filter campaigns">{["All campaigns", "Not running", "Live"].map((name) => <button key={name} className={`filter-tab ${filter === name ? "selected" : ""}`} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}<span>{name === "All campaigns" ? accountCampaigns.length : name === "Not running" ? nonLive.length : accountCampaigns.length - nonLive.length}</span></button>)}</div><label className="search-field"><Icon name="search" size={17} /><span className="sr-only">Search campaigns</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search campaigns…" /></label></div>
-      {busy === "meta-accounts" ? <div className="center-state inline campaign-loading" role="status" aria-live="polite"><div className="spinner" aria-hidden="true" /><p>Loading campaigns for the selected ad account…</p></div> : rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} /> : <Empty title={accountCampaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{accountCampaigns.length ? "Choose another campaign filter." : meta.connection ? (accounts.length && !accountFilter ? "Choose an ad account from the dropdown to sync and display its campaigns." : "No published campaigns were returned for this ad account. Publish a campaign with its switch off, then sync again, or choose another account.") : "Connect Meta Ads to import published campaigns."}</Empty>}
+      {busy === "meta-accounts" ? <div className="center-state inline campaign-loading" role="status" aria-live="polite"><div className="spinner" aria-hidden="true" /><p>Loading campaigns for the selected ad account…</p></div> : rows.length ? <CampaignTable items={rows} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} /> : <Empty title={accountCampaigns.length ? "No campaigns in this view" : "No campaign data yet"}>{accountCampaigns.length ? "Choose another campaign filter." : meta.connection ? (accounts.length && !accountFilter ? "Choose an account in the account selector above to sync and display its campaigns." : "No published campaigns were returned for this ad account. Publish a campaign with its switch off, then sync again, or choose another account.") : "Connect Meta Ads to import published campaigns."}</Empty>}
       <div className="table-footer"><span>{rows.length} campaign{rows.length === 1 ? "" : "s"}{search && ` matching “${search}”`}</span><span><Icon name="meta" size={15} /> Published data from Meta Ads</span></div>
     </section>
   </>;
@@ -1164,7 +1268,7 @@ function SiteWatch({ data, selectedCampaignId, busy, checkCampaign, monitorCampa
       </section>
       <section className="panel site-detail-panel">
         {!selected ? <Empty title="Choose a campaign">Select a monitored campaign to inspect its latest Meta destinations and check history.</Empty> : <>
-          <div className="site-detail-head"><div><div className="eyebrow">MONITORED CAMPAIGN</div><h2>{selected.campaign.name}</h2><p>{campaignObjective(selected.campaign.objective)} · Checked every minute</p></div><Status value={selected.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={selected.lastMonitoringAt ? "Watch active" : "Waiting for first check"} /></div>
+          <div className="site-detail-head"><div><div className="eyebrow">MONITORED CAMPAIGN</div><h2>{selected.campaign.name}</h2><p>{campaignObjective(selected.campaign.objective)} · {data.billing.monitoringActive ? `Every ${data.billing.monitoringIntervalMinutes} minutes` : "Coverage paused"}</p></div><Status value={!data.billing.monitoringActive ? "UNKNOWN" : data.billing.monitoredPages.blocked.length || data.billing.adAccounts.used > data.billing.adAccounts.limit ? "WARNING" : selected.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={!data.billing.monitoringActive ? "Coverage paused" : data.billing.monitoredPages.blocked.length || data.billing.adAccounts.used > data.billing.adAccounts.limit ? "Review coverage" : selected.lastMonitoringAt ? "Watch enabled" : "Waiting for first check"} /></div>
           <div className="site-timing"><div><span>Last check</span><strong>{formatDate(selected.lastMonitoringAt)}</strong></div><div><span>Next scheduled</span><strong>{formatDate(selected.nextMonitoringAt)}</strong></div><div><span>Current destinations</span><strong>{selected.monitoringDestinationCount ?? 0}</strong></div></div>
           <div className="site-actions"><Button kind="primary" icon="refresh" disabled={busy === "campaign-monitor:" + selected.campaign.id} onClick={() => checkCampaign(selected.campaign.id)}>{busy === "campaign-monitor:" + selected.campaign.id ? "Checking campaign…" : "Check now"}</Button><Button icon="watch" disabled={busy === "monitor:" + selected.campaign.id} onClick={() => monitorCampaign(selected.campaign.id, false)}>Pause watch</Button></div>
           {detailError && <div className="alert error" role="alert">{detailError}</div>}
@@ -1272,10 +1376,10 @@ function IncidentCard({ incident, campaignName, actOnIncident, busy }) {
   </article>;
 }
 
-function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
+function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, savePreferences }) {
   const { meta, campaigns = [], preferences } = data;
   const connected = meta.connection?.status === "CONNECTED";
-  const canPauseMetaCampaigns = meta.connection?.scopes?.includes("ads_management") === true;
+  const canPauseMetaCampaigns = connected && meta.connection?.scopes?.includes("ads_management") === true;
   const accounts = meta.accounts || [];
   return <>
     <PageHeading eyebrow="MAKE IT YOURS" title="Workspace settings" >Your connections, monitoring, and notifications. Just the way you need them.</PageHeading>
@@ -1283,22 +1387,37 @@ function Settings({ data, busy, syncMeta, disconnectMeta, savePreferences }) {
       <div className="settings-connection"><div><strong>{accounts.length} ad account{accounts.length === 1 ? "" : "s"} available</strong><p>{accounts.filter((account) => account.selected).length} selected for campaign sync</p></div>{meta.connection?.lastSyncAt && <small><Icon name="clock" size={14} /> Last synced {formatDate(meta.connection.lastSyncAt)}</small>}</div>
       {accounts.length > 0 && <details className="connected-accounts"><summary>View connected ad accounts <Icon name="chevron" size={15} /></summary><div className="account-details">{accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected && <span className="account-selected"><Icon name="check" size={12} /> Selected</span>}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>)}</div></details>}
       {!accounts.length && <p className="muted-copy">{connected ? "Sync your account to discover available campaigns." : "Connect Meta Ads to bring your campaigns into SteadySignal."}</p>}
-      <div className="settings-actions">{connected ? <>
-        <Button icon="refresh" onClick={syncMeta} disabled={busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : accounts.length ? "Refresh accounts" : "Discover ad accounts"}</Button>
+      <div className="settings-actions">{meta.connection ? <>
+        <Button icon="refresh" onClick={syncMeta} disabled={!connected || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : accounts.length ? "Refresh accounts" : "Discover ad accounts"}</Button>
         <Button icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Reconnect</Button><Button className="destructive-text" onClick={disconnectMeta}>Disconnect</Button>
       </> : <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}</div>
       {meta.connection?.lastError && <div className="alert error">{meta.connection.lastError}</div>}
     </section>
     <div className="settings-grid">
-      <section className="panel settings-monitoring"><span className="settings-section-icon"><Icon name="watch" size={22} /></span><h2>Campaign monitoring</h2><p>Fresh campaign details and destination checks, automatically.</p><div className="setting-line"><span>Check interval</span><strong>Every minute</strong></div><div className="setting-line"><span>Campaigns on watch</span><strong>{campaigns.filter((item) => item.monitoringEnabled).length} active</strong></div><a className="text-link" href="#/site-watch">Manage campaign watches <Icon name="arrow" size={15} /></a></section>
+      <section className="panel settings-monitoring"><span className="settings-section-icon"><Icon name="watch" size={22} /></span><h2>Campaign monitoring</h2><p>Fresh campaign details and destination checks, automatically.</p><div className="setting-line"><span>Check interval</span><strong>Every {data.billing.monitoringIntervalMinutes} minutes</strong></div><div className="setting-line"><span>Watches enabled</span><strong>{campaigns.filter((item) => item.monitoringEnabled).length} enabled</strong></div><a className="text-link" href="#/site-watch">Manage campaign watches <Icon name="arrow" size={15} /></a></section>
       <form className="panel settings-notifications" onSubmit={savePreferences}><span className="settings-section-icon"><Icon name="mail" size={22} /></span><h2>Stay in the loop</h2><p>Choose which campaign updates reach your inbox.</p>
         <label className="form-label">Notification email<input type="email" name="email" required maxLength="254" defaultValue={preferences.email} /></label>
         <label className="toggle-row"><span><strong>New incidents</strong><small>When a monitored page changes or fails.</small></span><input type="checkbox" name="incidentAlertsEnabled" defaultChecked={preferences.incidentAlertsEnabled} aria-label="Email me about new incidents" /></label>
         <label className="toggle-row"><span><strong>Recovery updates</strong><small>When a new check verifies recovery.</small></span><input type="checkbox" name="recoveryAlertsEnabled" defaultChecked={preferences.recoveryAlertsEnabled} aria-label="Email me about recovery updates" /></label>
-        <label className="toggle-row"><span><strong>Pause campaigns when a landing page is down</strong><small>Pauses active campaigns after two consecutive failed checks. If email delivery is enabled, a confirmation is sent to {preferences.email}. {canPauseMetaCampaigns ? "" : "Reconnect Meta Ads and grant ads_management access."}</small></span><input type="checkbox" name="autoPauseCampaignOnWebsiteDown" defaultChecked={preferences.autoPauseCampaignOnWebsiteDown} aria-label="Automatically pause campaigns after repeated landing page failures" /></label>
+        <div className="auto-pause-setting">
+          <label className="toggle-row auto-pause-row">
+            <span className="auto-pause-copy"><strong>Auto pause campaigns</strong><small id="auto-pause-description">Pause monitored, active Meta campaigns after two consecutive failed landing page checks. If email delivery is enabled, a confirmation goes to your notification email.</small></span>
+            <span className="auto-pause-control">
+              <input type="checkbox" role="switch" name="autoPauseCampaignOnWebsiteDown" defaultChecked={preferences.autoPauseCampaignOnWebsiteDown} aria-label="Automatically pause campaigns after repeated landing page failures" aria-describedby={`auto-pause-description auto-pause-disclaimer auto-pause-save-note${canPauseMetaCampaigns ? "" : " auto-pause-permission"}`} />
+              <span className="auto-pause-state" aria-hidden="true"><span className="auto-pause-on">On</span><span className="auto-pause-off">Off</span></span>
+            </span>
+          </label>
+          <div className="auto-pause-disclaimer" id="auto-pause-disclaimer" role="note">
+            <Icon name="warning" size={18} />
+            <div><strong>This changes live campaigns</strong><p>Temporary outages or blocked checks can trigger a pause. Campaigns stay paused until you reactivate them in Meta Ads, even after page recovery or switching auto pause off. Checks and Meta processing take time; ad spend can continue before a pause takes effect.</p></div>
+          </div>
+          {!canPauseMetaCampaigns && <p className="auto-pause-note" id="auto-pause-permission">Reconnect Meta Ads and allow campaign management to use auto pause.</p>}
+          <p className="auto-pause-note" id="auto-pause-save-note">Changes take effect after you save preferences.</p>
+        </div>
         <Button kind="primary" type="submit" disabled={busy === "preferences"}>{busy === "preferences" ? "Saving…" : "Save preferences"}</Button>
       </form>
     </div>
+    <AccountSettings account={account} request={request} onSignedOut={onSignedOut} />
     <p className="security-note"><Icon name="shield" size={15} /> Your Meta connection is encrypted. SteadySignal never publishes ads.</p>
   </>;
 }
@@ -1312,6 +1431,10 @@ function WebsiteRouter() {
   }, []);
   useEffect(() => {
     const titles = { home: "SteadySignal — Keep the promise behind every click", login: "Log in — SteadySignal", signup: "Create your workspace — SteadySignal", overview: "Campaign overview — SteadySignal", campaigns: "Your campaigns — SteadySignal", "site-watch": "Campaign watch — SteadySignal", incidents: "Incident report — SteadySignal", settings: "Workspace settings — SteadySignal", report: "Campaign QA report — SteadySignal" };
+    titles.billing = "Plan & usage - SteadySignal";
+    titles["forgot-password"] = "Recover your account — SteadySignal";
+    titles["reset-password"] = "Reset password — SteadySignal";
+    titles["delete-account"] = "Delete account — SteadySignal";
     document.title = titles[route.page];
     const anchor = route.page === "home" ? document.getElementById(window.location.hash.slice(1)) : null;
     if (anchor) anchor.scrollIntoView();
@@ -1321,3 +1444,9 @@ function WebsiteRouter() {
 }
 
 createRoot(document.getElementById("root")).render(<React.StrictMode><WebsiteRouter /></React.StrictMode>);
+
+function AnalysisConfirmation({ estimate, onCancel, onConfirm }) {
+  const dialog = useRef(null);
+  useEffect(() => { dialog.current?.showModal(); return () => dialog.current?.close(); }, []);
+  return <dialog ref={dialog} className="incident-decision-dialog" onCancel={(event) => { event.preventDefault(); onCancel(); }} aria-labelledby="analysis-confirm-title"><div className="incident-decision-content"><div className="eyebrow">BEFORE YOU RUN</div><h2 id="analysis-confirm-title">{estimate.analysisCount} ad {estimate.analysisCount === 1 ? "analysis" : "analyses"}</h2><p>Each ad is checked against its landing page, with all supported checks included. This campaign will reserve {estimate.analysisCount} analyses while the report runs.</p><p><strong>{estimate.remaining} analyses are available.</strong> Failed work and automatic retries do not use additional analyses.</p>{!estimate.canRun && <p>Your allowance does not cover this run. Choose a plan or add analyses before continuing.</p>}<div className="incident-decision-actions"><button className="button secondary" autoFocus onClick={onCancel}>Cancel</button>{estimate.canRun ? <button className="button primary" onClick={onConfirm}>Run {estimate.analysisCount} analyses</button> : <a className="button primary" href="#/billing" onClick={onCancel}>Review plan & usage</a>}</div></div></dialog>;
+}

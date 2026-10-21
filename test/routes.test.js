@@ -28,3 +28,22 @@ test("incident reports support direct links and preserve campaign, type, and sta
   assert.deepEqual(resolveRoute(incidentReportHref(filters)), { page: "incidents", ...filters });
   assert.deepEqual(resolveRoute(incidentReportHref({ campaignId: "campaign-42", type: "claims" })), { page: "incidents", campaignId: "campaign-42", type: "claims" });
 });
+
+test("recovery routes retain confirmation tokens in the URL fragment", () => {
+  assert.deepEqual(resolveRoute("#/forgot-password"), { page: "forgot-password" });
+  for (const page of ["reset-password", "delete-account"]) {
+    assert.deepEqual(resolveRoute(`#/${page}?token=single-use-token`), { page, token: "single-use-token" });
+    assert.deepEqual(resolveRoute(`#/${page}`), { page, token: "" });
+  }
+});
+
+test("Meta authorization cancellation returns to settings with a clear notice", () => {
+  assert.deepEqual(resolveRoute("#/settings?meta_error=denied"), { page: "settings", metaError: "denied" });
+});
+
+test("billing returns preserve the checkout reference without granting access", () => {
+  assert.deepEqual(resolveRoute("#/billing?checkout=success&session_id=cs_test_42"), { page: "billing", checkout: "success", sessionId: "cs_test_42", plan: "" });
+  assert.deepEqual(resolveRoute("#/billing?checkout=canceled"), { page: "billing", checkout: "canceled", sessionId: "", plan: "" });
+  assert.deepEqual(resolveRoute("#/signup?plan=GROWTH"), { page: "signup", plan: "GROWTH" });
+  assert.deepEqual(resolveRoute("#/signup?plan=UNTRUSTED"), { page: "signup" });
+});

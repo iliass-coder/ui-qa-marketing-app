@@ -22,6 +22,9 @@ The public landing page at `/` renders without backend requests. Its design and 
 | `/` | Public landing page |
 | `/#/login` | Sign in |
 | `/#/signup` | Create a workspace |
+| `/#/forgot-password` | Request a password reset email |
+| `/#/reset-password?token=...` | Set a password with an expiring email link |
+| `/#/delete-account?token=...` | Sign in and confirm account deletion |
 | `/#/overview` | Authenticated workspace |
 | `/#/campaigns`, `/#/site-watch`, `/#/settings` | Protected product screens |
 | `/#/report/:campaignId` | Protected campaign report |
@@ -46,6 +49,8 @@ Production files are written to `dist/`. Serve the frontend and backend API on t
 
 The Meta OAuth callback must return to the backend origin configured as `APP_ORIGIN`, with the corresponding callback URL registered in Meta. The frontend never reads or stores the Meta access token.
 
+After successful Meta authorization, the backend returns to `APP_ORIGIN/#/settings`. Set `META_RETURN_URL` to the frontend page URL when using a separate Vite server (for example, `http://localhost:5173/#/settings`) or to return to `/#/overview`. A cancelled authorization returns to Settings with a notice.
+
 The campaign library imports published Meta campaigns, including paused campaigns. The **Not running** filter groups campaigns that are not currently live; each row shows its Meta status or scheduled phase. To review a new campaign before activation, publish its campaign, ad sets, and ads with the campaign switched off, then sync and run QA. Checks cover published data; unpublished drafts and unpublished edits are unavailable.
 
 Google sign-in and sign-up are optional. Configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the backend, and register `${APP_ORIGIN}/login/oauth2/code/google` as the Google OAuth web client's authorized redirect URI. Set `GOOGLE_LOGIN_SUCCESS_URL` to the frontend URL after sign-in. For local development, keep the hostname consistent with `APP_ORIGIN` so the session cookie is shared (for example, `localhost` for both the backend and Vite).
@@ -56,4 +61,16 @@ For production SSO, the same public app host must route `/api/**`, `/oauth2/**`,
 
 ## Backend contract used by this UI
 
-The UI uses the existing backend routes for login/session, Meta connection and sync, campaigns/ads, QA runs/results/evidence, sites/snapshots/incidents, notification preferences, dashboard counts, and job status. The one-minute monitoring schedule, optional campaign auto-pause, and URL safety checks remain server-side. Configure Meta, database, and email credentials only in the backend project.
+Sign-in lasts 48 hours without activity by default, configured on the backend with `SESSION_IDLE_TIMEOUT_HOURS`. Visible interaction and returning to the workspace renew the server session and HttpOnly cookie through `POST /api/auth/activity`, at most once a minute per tab. Background status polling does not renew it. Expired sessions return to sign-in with a notice.
+
+Workspace settings include password changes and deletion confirmation by email. Password reset/change signs out all devices. Deletion removes the shared workspace only when its last member leaves; campaigns in Meta remain in their current state. These email flows require working backend SMTP and `ACCOUNT_RECOVERY_ENABLED=true` (defaults to `EMAIL_VERIFICATION_ENABLED` when omitted).
+
+Meta settings show token and data-access expiry. Reconnect warnings appear seven days before the earlier expiry; expired or revoked access blocks automatic campaign actions until reconnection. Existing connections without verified metadata display an access warning. Connection status refreshes every minute and when the window regains focus. The backend exchanges fresh OAuth tokens for long-lived tokens and verifies them on a schedule; renewing access uses Meta reconnection.
+
+The UI uses the existing backend routes for login/session, Meta connection and sync, campaigns/ads, QA runs/results/evidence, sites/snapshots/incidents, notification preferences, dashboard counts, and job status. Plan-specific monitoring intervals, quota enforcement, optional campaign auto-pause, and URL safety checks remain server-side. Configure Meta, database, and email credentials only in the backend project.
+
+## Plans and usage
+
+`/#/billing` shows trial status, analysis reservations and balances, monitored-page limits, selected-account limits, and usage by Meta account. Stripe hosts checkout, subscription changes, payment methods, invoices, and cancellation. Public pricing and FAQs explain the 10-analysis preview, card-free 14-day monitoring trial, Starter ($39), Growth ($99), and Agency by arrangement. Plan intent survives signup. Campaign QA confirms the analysis count before a run; the account picker enforces the displayed account allowance.
+
+Set up the backend using [the billing guide](../qa-marketing-integration/docs/billing.md). Paid checkout stays unavailable until its two Stripe secrets are configured.

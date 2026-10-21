@@ -1,0 +1,44 @@
+.pricing-cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
+.pricing-card { position:relative; padding:29px 25px; border:1px solid #dcded4; border-radius:13px; background:#fffdf8; color:#26383e; display:flex; flex-direction:column; min-width:0; }
+.pricing-featured { background:#263e42; color:#fffaf0; border-color:#263e42; box-shadow:0 12px 30px #26383e14; }
+.pricing-card-top { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:26px; flex-wrap:wrap; }
+.pricing-plan-name { font-family:var(--font-display); font-size:21px; font-weight:650; }
+.pricing-label { font-size:8px; font-weight:650; letter-spacing:1.1px; background:#cbdcc9; color:#2f4d3c; border-radius:4px; padding:6px 8px; }
+.pricing-description { font-size:13px; line-height:1.7; opacity:.77; min-height:44px; margin:15px 0 20px; }
+.pricing-amount { display:flex; align-items:baseline; gap:10px; }
+.pricing-amount strong { font-family:var(--font-display); font-size:55px; line-height:1.1; font-weight:550; letter-spacing:-2.6px; }
+.pricing-amount > span { font-size:12px; opacity:.65; }
+.pricing-note { font-size:11px; line-height:1.6; opacity:.7; min-height:34px; margin:13px 0 20px; }
+.pricing-action { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 16px; min-height:46px; text-decoration:none; border:1px solid #bdc5b7; border-radius:6px; background:transparent; color:inherit; font-size:12px; font-weight:650; cursor:pointer; }
+.pricing-action:hover { background:#e9eee3; color:#26383e; }
+.pricing-action.is-primary { background:#e5a48b; border-color:#e5a48b; color:#26383e; }
+.pricing-action:disabled { opacity:.55; cursor:default; }
+.pricing-action:focus-visible { outline:3px solid #ce654d; outline-offset:4px; }
+.pricing-current { min-height:46px; display:flex; align-items:center; font-size:12px; font-weight:600; }
+.pricing-features { list-style:none; margin:25px 0 0; padding:22px 0 0; border-top:1px solid #82907b33; display:grid; gap:14px; }
+.pricing-features li { display:flex; align-items:flex-start; gap:9px; font-size:12px; line-height:1.55; }
+.pricing-features .icon { flex-shrink:0; color:#64876b; margin-top:2px; }
+.pricing-featured .pricing-features .icon { color:#bad1b6; }
+.pricing-agency { display:flex; align-items:center; gap:21px; padding:26px 28px; margin-top:20px; border:1px solid #dcded4; border-radius:10px; background:#edf0e6; }
+.pricing-agency-icon { color:#5e7968; flex-shrink:0; }
+.pricing-agency > div { flex:1; }
+.pricing-agency strong { font-size:15px; font-weight:600; }
+.pricing-agency p { max-width:660px; font-size:12px; line-height:1.8; margin:6px 0 0; color:#62706a; }
+.pricing-agency-note { max-width:180px; font-size:11px; line-height:1.7; color:#62706a; }
+.billing-notice { display:flex; align-items:center; gap:14px; border:1px solid #d6dfcd; background:#eff3e9; border-radius:8px; padding:15px 19px; margin:0 0 24px; color:#365144; }
+.billing-notice-warning { background:#fff3e5; border-color:#ebd6bc; color:#81552e; }
+.billing-notice > div { flex:1; display:grid; gap:5px; }.billing-notice strong { font-size:12px; }.billing-notice span { font-size:11px; line-height:1.6; }
+.billing-notice a { display:flex; align-items:center; gap:7px; font-size:11px; font-weight:650; color:inherit; text-decoration:none; white-space:nowrap; }
+.billing-current,.billing-topup { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:22px; }
+.billing-current h2 { margin:9px 0; font-size:25px; }.billing-current p,.billing-topup p,.billing-explainer p,.billing-account-usage > p,.billing-blocked p { color:var(--muted,#68736b); font-size:12px; line-height:1.8; }.billing-current small,.billing-topup small { color:var(--muted,#68736b); font-size:11px; }
+.billing-usage-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-bottom:22px; }
+.billing-usage-card { background:var(--white,#fffdf8); border:1px solid var(--line,#dcded4); border-radius:10px; padding:23px; }
+.billing-usage-card > span { font-size:12px; color:var(--muted,#68736b); }.billing-usage-card > div { margin:15px 0; display:flex; align-items:baseline; gap:8px; }.billing-usage-card strong { font-family:var(--font-display); font-size:34px; font-weight:550; }.billing-usage-card > div span { font-size:13px; color:var(--muted,#68736b); }
+.billing-usage-card progress { width:100%; height:5px; border:0; border-radius:4px; background:#e7eadf; accent-color:#63816b; }.billing-usage-card progress::-webkit-progress-bar { background:#e7eadf; border-radius:4px; }.billing-usage-card progress::-webkit-progress-value { background:#63816b; border-radius:4px; }.billing-usage-card p { font-size:11px; line-height:1.7; color:var(--muted,#68736b); margin:12px 0 0; }
+.billing-topup { background:#edf0e6; }.billing-topup h2 { font-size:16px; margin:0; }.page-billing .pricing-card { padding:24px 21px; }.page-billing .pricing-plan-name { font-size:19px; }
+.billing-explainer,.billing-account-usage,.billing-blocked { margin-top:22px; }.billing-explainer h2,.billing-account-usage h2,.billing-blocked h2 { font-size:17px; }.billing-table-wrap { overflow-x:auto; }.billing-account-usage table { border-collapse:collapse; width:100%; font-size:12px; text-align:left; }.billing-account-usage th,.billing-account-usage td { padding:15px 12px; border-bottom:1px solid #e7e8df; }.billing-account-usage th { color:var(--muted,#68736b); font-size:11px; font-weight:500; }.billing-account-usage td small { display:block; font-size:10px; color:var(--muted,#68736b); margin-top:5px; }.billing-blocked ul { padding-left:18px; font-size:12px; line-height:2; overflow-wrap:anywhere; }
+.lp-pricing { scroll-margin-top:100px; }.lp-pricing-header { display:flex; justify-content:space-between; align-items:flex-end; gap:40px; margin-bottom:37px; }.lp-pricing-header h2 { font-size:clamp(34px,4vw,53px); line-height:1.15; letter-spacing:-1.8px; font-weight:500; margin:22px 0 0; }.lp-pricing-header > p { max-width:320px; color:var(--muted); font-size:13px; line-height:1.9; margin:0 0 4px; }.lp-pricing-footnote { display:flex; gap:35px; justify-content:space-between; margin-top:24px; color:var(--muted); font-size:11px; line-height:1.9; }.lp-pricing-footnote p { max-width:540px; margin:0; }.lp-pricing-footnote strong { color:var(--ink); font-weight:600; }
+@media(max-width:1050px) { .page-billing .pricing-cards { grid-template-columns:1fr; }.page-billing .pricing-description,.page-billing .pricing-note { min-height:0; }.page-billing .pricing-features { grid-template-columns:repeat(2,minmax(0,1fr)); }.pricing-card { padding:23px 19px; }.pricing-agency { align-items:flex-start; flex-wrap:wrap; } }
+@media(max-width:760px) { .pricing-cards,.billing-usage-grid { grid-template-columns:1fr; }.pricing-description,.pricing-note { min-height:0; }.pricing-card { padding:29px 26px; }.billing-current,.billing-topup { flex-direction:column; align-items:stretch; }.billing-notice { flex-wrap:wrap; }.billing-notice > div { min-width:180px; }.billing-notice > a { margin-left:32px; }.lp-pricing-header,.lp-pricing-footnote { flex-direction:column; align-items:flex-start; gap:20px; }.lp-pricing-header > p { max-width:100%; }.pricing-agency { padding:24px; gap:13px; }.pricing-agency > div { flex-basis:calc(100% - 50px); }.pricing-agency-note { max-width:none; margin-left:37px; }.page-billing .pricing-features { grid-template-columns:1fr; } }
+
+.billing-account-picker { margin-bottom:24px; }.billing-account-picker summary { display:flex; justify-content:space-between; gap:20px; cursor:pointer; font-size:13px; font-weight:600; }.billing-account-picker summary span,.billing-account-picker p { font-size:11px; color:var(--muted); font-weight:400; }.billing-account-picker > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:18px 0; }.billing-account-picker label { display:flex; align-items:center; gap:10px; border:1px solid var(--line,#dcded4); padding:14px; border-radius:7px; font-size:12px; }.billing-account-picker input { width:16px; height:16px; accent-color:#63816b; }.billing-account-picker label small { display:block; margin-top:5px; color:var(--muted); font-size:10px; }

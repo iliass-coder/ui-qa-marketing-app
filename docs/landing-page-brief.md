@@ -48,7 +48,7 @@ Feature headings and descriptions:
 
 Start a campaign watch to keep checking its current destinations. Each scheduled run refreshes the campaign from Meta before inspecting the pages.
 
-Facts: Scheduled every minute. Current Meta destinations. Changes recorded as incidents.
+Facts: Paid inspections every 15 minutes; free preview inspections every 30 minutes. Current Meta destinations. Changes recorded as incidents.
 
 Action: Explore campaign watch → after-launch example.
 
@@ -68,7 +68,7 @@ Campaign checks do not publish ads or edit creative. You can separately enable a
 
 **How often are destinations checked?**
 
-Active campaign watches are scheduled every minute. Each run refreshes the campaign's current destinations from Meta before inspecting them.
+Paid campaign watches are scheduled every 15 minutes; the free monitoring preview uses a 30-minute interval. Each run refreshes the campaign's current destinations from Meta before inspecting them.
 
 **What if a detail cannot be verified?**
 
@@ -103,3 +103,7 @@ Product claims were checked against the current application and backend document
 ## Composition references
 
 [Plain](https://www.plain.com/) and [incident.io](https://incident.io/) informed the use of a clear product story and product-focused examples. The headline, copy, illustrations, and page composition are original to SteadySignal.
+
+## Pricing update
+
+The public page now includes Free Preview (10 analyses total and 14 days of monitoring for 3 pages, without a credit card), Starter ($39/month, 100 analyses, 5 pages, 1 Meta account), and Growth ($99/month, 500 analyses, 25 pages, 3 accounts). Agency is available by arrangement from $249/month. Analysis packs cost $15 for 100, valid for 90 days. The pricing section follows the existing ivory, coral, and sage palette, with Growth in a dark feature card. All public terms mirror backend entitlements documented in `qa-marketing-integration/docs/billing.md`.
