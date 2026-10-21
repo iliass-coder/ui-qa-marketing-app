@@ -353,6 +353,11 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
 .auto-pause-disclaimer strong { font-size: 12px; font-weight: 600; }
 .auto-pause-disclaimer p { margin: 5px 0 0; font-size: 12px; line-height: 1.7; }
 .auto-pause-note { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.auto-pause-history { margin-top: 16px; }
+.auto-pause-history > strong { font-size: 12px; }
+.auto-pause-history ul { padding: 0; margin: 8px 0 0; list-style: none; }
+.auto-pause-history li { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.auto-pause-history li small, .auto-pause-history li span { color: var(--muted); overflow-wrap: anywhere; }
 .settings-notifications > .button { justify-self: end; margin-top: 10px; }
 .security-note { display: flex; gap: 7px; align-items: center; font-size: 11px; color: var(--muted); margin: 20px 0 0; }
 

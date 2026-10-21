@@ -5,7 +5,7 @@ import "./landing.css";
 import { PricingCards, AgencyNote } from "./Billing.jsx";
 
 const questions = [
-  ["Does SteadySignal change my ads?", "Campaign checks do not publish ads or edit creative. You can separately enable automatic pausing after repeated landing-page failures. That option requires Meta permission and two consecutive failed checks."],
+  ["Does SteadySignal change my ads?", "Campaign checks do not publish ads or edit creative. Optional campaign pausing starts in simulation mode so you can review proposed pauses. Live pausing requires campaign management permission, two confirmed page failures, and a fresh recheck. Blocked or uncertain checks do not qualify."],
   ["How often are destinations checked?", "Paid campaign watches are scheduled every 15 minutes; the free monitoring trial runs every 30 minutes. Each run refreshes the campaign’s current destinations from Meta before inspecting them."],
   ["Do I need a credit card for the trial?", "No. Your free preview includes 10 ad analyses in total and 14 days of monitoring for up to 3 landing pages. The monitoring trial starts with your first watch. When it ends, monitoring stops and your saved reports remain available. There is no automatic charge."],
   ["What counts as an analysis or a monitored page?", "One analysis checks one ad against its landing page, including all supported checks. A campaign with 20 ads uses 20 analyses. One distinct landing-page URL uses one monitoring slot across your workspace, even when several campaigns share it. Meaningful query variants count separately."],

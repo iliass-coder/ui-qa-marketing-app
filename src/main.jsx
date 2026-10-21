@@ -1378,8 +1378,21 @@ function IncidentCard({ incident, campaignName, actOnIncident, busy }) {
 
 function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, savePreferences }) {
   const { meta, campaigns = [], preferences } = data;
+  const simulation = preferences.autoPauseSimulation === true;
+  const [pauseSimulations, setPauseSimulations] = useState([]);
+  const [pauseHistoryError, setPauseHistoryError] = useState("");
+  useEffect(() => {
+    if (!simulation) return;
+    let active = true;
+    request("/api/audit-events?eventType=CAMPAIGN_AUTO_PAUSE_SIMULATED")
+      .then((events) => {
+        if (active) { setPauseSimulations(events.slice(0, 5)); setPauseHistoryError(""); }
+      })
+      .catch(() => { if (active) setPauseHistoryError("Proposed pause history could not be loaded."); });
+    return () => { active = false; };
+  }, [data, simulation]);
   const connected = meta.connection?.status === "CONNECTED";
-  const canPauseMetaCampaigns = connected && meta.connection?.scopes?.includes("ads_management") === true;
+  const canPauseMetaCampaigns = connected && (simulation || meta.connection?.scopes?.includes("ads_management") === true);
   const accounts = meta.accounts || [];
   return <>
     <PageHeading eyebrow="MAKE IT YOURS" title="Workspace settings" >Your connections, monitoring, and notifications. Just the way you need them.</PageHeading>
@@ -1401,18 +1414,21 @@ function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, 
         <label className="toggle-row"><span><strong>Recovery updates</strong><small>When a new check verifies recovery.</small></span><input type="checkbox" name="recoveryAlertsEnabled" defaultChecked={preferences.recoveryAlertsEnabled} aria-label="Email me about recovery updates" /></label>
         <div className="auto-pause-setting">
           <label className="toggle-row auto-pause-row">
-            <span className="auto-pause-copy"><strong>Auto pause campaigns</strong><small id="auto-pause-description">Pause monitored, active Meta campaigns after two consecutive failed landing page checks. If email delivery is enabled, a confirmation goes to your notification email.</small></span>
+            <span className="auto-pause-copy"><strong>{simulation ? "Simulate campaign pauses" : "Auto pause campaigns"}</strong><small id="auto-pause-description">{simulation ? "Record proposed pauses after two confirmed landing page failures and a fresh recheck." : "Pause monitored, active Meta campaigns after two confirmed landing page failures and a fresh recheck. If email delivery is enabled, a confirmation goes to your notification email."} Blocked or uncertain checks do not qualify.</small></span>
             <span className="auto-pause-control">
-              <input type="checkbox" role="switch" name="autoPauseCampaignOnWebsiteDown" defaultChecked={preferences.autoPauseCampaignOnWebsiteDown} aria-label="Automatically pause campaigns after repeated landing page failures" aria-describedby={`auto-pause-description auto-pause-disclaimer auto-pause-save-note${canPauseMetaCampaigns ? "" : " auto-pause-permission"}`} />
+              <input type="checkbox" role="switch" name="autoPauseCampaignOnWebsiteDown" defaultChecked={preferences.autoPauseCampaignOnWebsiteDown} aria-label={simulation ? "Simulate campaign pauses after confirmed landing page failures" : "Automatically pause campaigns after confirmed landing page failures"} aria-describedby={`auto-pause-description auto-pause-disclaimer auto-pause-save-note${canPauseMetaCampaigns ? "" : " auto-pause-permission"}`} />
               <span className="auto-pause-state" aria-hidden="true"><span className="auto-pause-on">On</span><span className="auto-pause-off">Off</span></span>
             </span>
           </label>
           <div className="auto-pause-disclaimer" id="auto-pause-disclaimer" role="note">
             <Icon name="warning" size={18} />
-            <div><strong>This changes live campaigns</strong><p>Temporary outages or blocked checks can trigger a pause. Campaigns stay paused until you reactivate them in Meta Ads, even after page recovery or switching auto pause off. Checks and Meta processing take time; ad spend can continue before a pause takes effect.</p></div>
+            <div><strong>{simulation ? "Simulation mode: campaigns keep running" : "This changes live campaigns"}</strong><p>{simulation ? "Proposed pauses appear below for review. Simulation does not stop ad spending during an outage." : "Confirmed failures can still be temporary. Campaigns stay paused until you reactivate them in Meta Ads, even after page recovery or switching auto pause off. Checks and Meta processing take time; ad spend can continue before a pause takes effect."}</p></div>
           </div>
-          {!canPauseMetaCampaigns && <p className="auto-pause-note" id="auto-pause-permission">Reconnect Meta Ads and allow campaign management to use auto pause.</p>}
+          {!canPauseMetaCampaigns && <p className="auto-pause-note" id="auto-pause-permission">{simulation ? "Connect Meta Ads to use pause simulation." : "Reconnect Meta Ads and allow campaign management to use auto pause."}</p>}
           <p className="auto-pause-note" id="auto-pause-save-note">Changes take effect after you save preferences.</p>
+          {simulation && <div className="auto-pause-history" aria-label="Recent proposed campaign pauses"><strong>Recent proposed pauses</strong>
+            {pauseHistoryError ? <p className="auto-pause-note" role="status">{pauseHistoryError}</p> : pauseSimulations.length ? <ul>{pauseSimulations.map((event) => <li key={event.id}><strong>{event.metadataJson?.campaignName || "Campaign"}</strong><small>{formatDate(event.createdAt)}</small><span>{event.metadataJson?.url}</span></li>)}</ul> : <p className="auto-pause-note">No proposed pauses recorded yet.</p>}
+          </div>}
         </div>
         <Button kind="primary" type="submit" disabled={busy === "preferences"}>{busy === "preferences" ? "Saving…" : "Save preferences"}</Button>
       </form>
