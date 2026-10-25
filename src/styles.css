@@ -405,7 +405,6 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
 .form-stack > .button { min-height: 44px; margin-top: 8px; font-size: 14px; }
 .google-button { width: 100%; min-height: 44px; margin-bottom: 24px; font-size: 14px; }
 .google-g { font: 700 17px Arial,sans-serif; color: #4285f4; }
-.google-signup-hint { font-size: 12px !important; margin: -14px 0 20px !important; }
 .login-divider { display: flex; align-items: center; gap: 15px; color: #8a958d; font-size: 11px; margin: 0 0 26px; }
 .login-divider::before, .login-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .login-card > .fine-print { display: flex; align-items: center; justify-content: center; gap: 6px; color: #849087; font-size: 11px; margin: 17px 0 0; }

@@ -139,7 +139,6 @@ function App() {
   const [emailSignupEnabled, setEmailSignupEnabled] = useState(false);
   const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(null);
   const [authMode, setAuthMode] = useState(() => routeFromHash().page === "signup" ? "signup" : "signin");
-  const [signupWorkspaceName, setSignupWorkspaceName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [canResendVerification, setCanResendVerification] = useState(false);
   const [route, setRoute] = useState(routeFromHash);
@@ -304,7 +303,6 @@ function App() {
 
   const startGoogleAuth = () => {
     const params = new URLSearchParams({ flow: authMode });
-    if (authMode === "signup") params.set("workspaceName", signupWorkspaceName);
     window.location.assign(`/api/auth/google/start?${params.toString()}`);
   };
 
@@ -537,16 +535,15 @@ function App() {
       {route.page === "delete-account" && <div className="alert" role="status">Sign in to the account you requested to delete. If you use Google, reopen the link in your deletion email after signing in.</div>}
       {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your workspace." : "Email registration is currently unavailable. Contact your workspace administrator."}</div>}
       {googleEnabled && <>
-        <Button type="button" className="google-button" disabled={!googleEnabled || (authMode === "signup" && !signupWorkspaceName.trim())} onClick={startGoogleAuth} title={!googleEnabled ? "Google sign-in is not configured" : undefined}>
+        <Button type="button" className="google-button" onClick={startGoogleAuth}>
           <span className="google-g" aria-hidden="true">G</span>{authMode === "signup" ? "Sign up with Google" : "Sign in with Google"}
         </Button>
-        {authMode === "signup" && !signupWorkspaceName.trim() && <p className="google-signup-hint">Enter a workspace name below to continue with Google.</p>}
         <div className="login-divider"><span>or continue with email</span></div>
       </>}
       <form key={authMode} onSubmit={login} className="form-stack">
         {authMode === "signup" && <>
           <label>Your name<input type="text" name="name" autoComplete="name" required maxLength="80" /></label>
-          <label>Workspace name<input type="text" name="workspaceName" autoComplete="organization" required minLength="2" maxLength="80" value={signupWorkspaceName} onChange={(event) => setSignupWorkspaceName(event.target.value)} /></label>
+          <label>Workspace name<input type="text" name="workspaceName" autoComplete="organization" required minLength="2" maxLength="80" /></label>
         </>}
         <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" value={authEmail} onChange={(event) => { setAuthEmail(event.target.value); setCanResendVerification(false); }} /></label>
         <label>Password<input type="password" name="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} required minLength={authMode === "signup" ? 16 : undefined} maxLength="200" /></label>
