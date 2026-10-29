@@ -8,6 +8,8 @@ import { AccountSettings, MetaConnectionNotice, RecoveryPage } from "./AccountAc
 import { BillingPage, BillingNotice } from "./Billing.jsx";
 import { resolveRoute } from "./routes.js";
 import { watchSessionActivity } from "./session.js";
+import { AnalyticsConsent } from "./AnalyticsConsent.jsx";
+import { recordReportView } from "./analytics.js";
 import { INCIDENT_REPORT_LIMIT, INCIDENT_TYPES, groupIncidents, incidentReportHref, incidentType, incidentTypeLabel, incidentValueText } from "./incidents.js";
 import "./styles.css";
 import "./overview.css";
@@ -44,6 +46,7 @@ const request = async (path, options = {}) => {
       SUBSCRIPTION_REQUIRED: "Choose a paid plan before purchasing additional analyses.",
       INTENTIONAL_SETTING_NOT_ACTIVE: "This incident type is already using normal monitoring. Refresh to see its current status.",
       META_ADS_MANAGEMENT_REQUIRED: "Reconnect Meta Ads and grant the ads_management permission to enable automatic pausing.",
+      AUTO_PAUSE_BETA_ACKNOWLEDGEMENT_REQUIRED: "Review and accept the beta warning before enabling automatic pausing.",
       META_PERMISSION_DENIED: "Meta did not grant the permission required to pause campaigns. Reconnect Meta Ads and approve the requested access.",
       EMAIL_VERIFICATION_NOT_CONFIGURED: "Email sign-up is not enabled yet. Configure SMTP and enable email verification, or sign up with Google.",
       EMAIL_DELIVERY_FAILED: "We could not send the verification email. Check the SMTP settings and try again.",
@@ -56,7 +59,7 @@ const request = async (path, options = {}) => {
       CURRENT_PASSWORD_INCORRECT: "Your current password was not accepted.",
       PASSWORD_NOT_SET: "Use a password setup email to add a password to your account.",
       PASSWORD_UNCHANGED: "Choose a password different from your current password.",
-      PASSWORD_POLICY: "Use a password with 16 to 200 characters.",
+      PASSWORD_POLICY: "Use a password with 8 to 200 characters.",
       META_TOKEN_EXPIRED: "Meta access has expired. Reconnect Meta Ads in settings.",
       META_RECONNECT_REQUIRED: "Reconnect Meta Ads in settings to restore access.",
       RATE_LIMITED: "Too many requests. Wait a minute and try again.",
@@ -471,6 +474,31 @@ function App() {
     }
   };
 
+  const saveAutomaticPausing = async (enabled) => {
+    setBusy("auto-pause");
+    setLoadError("");
+    try {
+      const preferences = await request("/api/notification-preferences", {
+        method: "PATCH",
+        body: {
+          email: data.preferences.email,
+          incidentAlertsEnabled: data.preferences.incidentAlertsEnabled,
+          recoveryAlertsEnabled: data.preferences.recoveryAlertsEnabled,
+          autoPauseCampaignOnWebsiteDown: enabled,
+          autoPauseBetaAcknowledged: enabled
+        }
+      });
+      setData((current) => current ? { ...current, preferences } : current);
+      setToast(enabled ? "Automatic pausing enabled (beta)." : "Automatic pausing disabled. Paused campaigns can be restarted in Meta Ads.");
+      return { ok: true };
+    } catch (error) {
+      setLoadError(error.message);
+      return { ok: false, message: error.message };
+    } finally {
+      setBusy("");
+    }
+  };
+
   const performIncidentAction = async (incident, action) => {
     setBusy(`incident:${incident.id}`);
     setLoadError("");
@@ -527,13 +555,14 @@ function App() {
     return <RecoveryPage key={`${route.page}:${route.token || ""}`} mode={route.page} token={route.token} request={request} enabled={passwordRecoveryEnabled} account={user} onSignedOut={accountSignedOut} />;
   }
   if (auth === "signed-out") {
-    return <main className="login-page"><aside className="login-story"><a href="/" className="login-brand" aria-label="SteadySignal home"><Brand /></a><div className="login-story-copy"><div className="health-kicker">A CLEARER SIGNAL</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>SteadySignal</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Thoughtful checks. Steadier campaigns.</div></aside><div className="login-form-region"><section className="login-card">
+    return <main className="login-page"><aside className="login-story"><a href="/" className="login-brand" aria-label="Click Cohere home"><Brand /></a><div className="login-story-copy"><div className="health-kicker">EVERY CLICK, CONNECTED</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>Click Cohere</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Your ad. Your page. One connected story.</div></aside><div className="login-form-region"><section className="login-card">
       <div className="eyebrow">YOUR CAMPAIGN WORKSPACE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start with 10 ad analyses and a 14-day monitoring preview. No credit card required." : "Sign in and see how your campaigns are doing."}</p>
       {loadError && <div className="alert error" role="alert">{loadError} Check that the backend is running, then try again.</div>}
       {loginError && <div className="alert error" role="alert">{loginError}</div>}
       {loginNotice && <div className="alert success" role="status">{loginNotice}</div>}
       {route.page === "delete-account" && <div className="alert" role="status">Sign in to the account you requested to delete. If you use Google, reopen the link in your deletion email after signing in.</div>}
       {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your workspace." : "Email registration is currently unavailable. Contact your workspace administrator."}</div>}
+      {authMode === "signup" && <p className="signup-policies">By creating an account, including with Google, you agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms</a>. Read our <a href="/privacy.html" target="_blank" rel="noopener">Privacy notice</a> and <a href="/refunds.html" target="_blank" rel="noopener">Refunds &amp; cancellation policy</a>.</p>}
       {googleEnabled && <>
         <Button type="button" className="google-button" onClick={startGoogleAuth}>
           <span className="google-g" aria-hidden="true">G</span>{authMode === "signup" ? "Sign up with Google" : "Sign in with Google"}
@@ -546,14 +575,14 @@ function App() {
           <label>Workspace name<input type="text" name="workspaceName" autoComplete="organization" required minLength="2" maxLength="80" /></label>
         </>}
         <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" value={authEmail} onChange={(event) => { setAuthEmail(event.target.value); setCanResendVerification(false); }} /></label>
-        <label>Password<input type="password" name="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} required minLength={authMode === "signup" ? 16 : undefined} maxLength="200" /></label>
-        {authMode === "signup" && <label>Confirm password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="16" maxLength="200" /></label>}
+        <label>Password<input type="password" name="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} required minLength={authMode === "signup" ? 8 : undefined} maxLength="200" /></label>
+        {authMode === "signup" && <label>Confirm password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="8" maxLength="200" /></label>}
         <Button kind="primary" type="submit" disabled={loginBusy || (authMode === "signup" && !emailSignupEnabled)}>{loginBusy ? (authMode === "signup" ? "Creating account…" : "Signing in…") : (authMode === "signup" ? "Create account" : "Sign in")}</Button>
-      </form><p className="fine-print"><Icon name="shield" size={13} />{authMode === "signup" ? "Use at least 16 characters. We'll verify your email." : "A secure space for your campaign work."}</p>
+      </form><p className="fine-print"><Icon name="shield" size={13} />{authMode === "signup" ? "Use at least 8 characters. We'll verify your email." : "A secure space for your campaign work."}</p>
       {authMode === "signin" && canResendVerification && <Button type="button" className="resend-verification" disabled={loginBusy || !authEmail.trim()} onClick={resendVerification}>Resend verification email</Button>}
       {authMode === "signin" && <p className="forgot-password-link"><a className="text-link" href="#/forgot-password">Forgot password?</a></p>}
-      <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to SteadySignal?"} <a className="text-button" href={authMode === "signup" ? "#/login" : "#/signup"} onClick={() => setLoginError("")}>{authMode === "signup" ? "Sign in" : "Create an account"}</a></p>
-    </section><p className="login-form-foot">SteadySignal · Campaign assurance, made clear.</p></div></main>;
+      <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to Click Cohere?"} <a className="text-button" href={authMode === "signup" ? "#/login" : "#/signup"} onClick={() => setLoginError("")}>{authMode === "signup" ? "Sign in" : "Create an account"}</a></p>
+    </section><p className="login-form-foot">Click Cohere · Campaign assurance, made clear.</p></div></main>;
   }
   if (route.page === "login" || route.page === "signup") return <main className="center-state"><div className="spinner" /><p>Opening your workspace…</p></main>;
   if (!data) return <main className="center-state"><div className="spinner" /><p>Loading workspace data…</p>{loadError && <p role="alert">{loadError} <button className="text-button" onClick={reload}>Try again</button></p>}</main>;
@@ -568,7 +597,7 @@ function App() {
     {qaConfirmation && <AnalysisConfirmation estimate={qaConfirmation} onCancel={() => setQaConfirmation(null)} onConfirm={() => { const id = qaConfirmation.campaignId; setQaConfirmation(null); executeQa(id); }} />}
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
     <aside className="sidebar">
-      <a href="#/overview" className="brand-link" aria-label="SteadySignal overview"><Brand /></a>
+      <a href="#/overview" className="brand-link" aria-label="Click Cohere overview"><Brand /></a>
       <div className="workspace-card"><span className="workspace-monogram">{(user?.workspace?.name || "W").slice(0, 1).toUpperCase()}</span><span><strong>{user?.workspace?.name || "My workspace"}</strong><small>Campaign workspace</small></span></div>
       <div className="nav-caption">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
@@ -606,9 +635,9 @@ function App() {
         {route.page === "report" && <QaReport campaignId={route.id} refreshKey={data.campaigns?.find((item) => item.campaign?.id === route.id)?.lastQa?.id || ""} runQa={runQa} busy={busy} />}
         {route.page === "site-watch" && <SiteWatch data={data} selectedCampaignId={route.campaignId} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
         {route.page === "incidents" && <IncidentReport data={data} route={route} busy={busy} actOnIncident={actOnIncident} />}
-        {route.page === "settings" && <Settings data={data} account={user} onSignedOut={accountSignedOut} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} />}
+        {route.page === "settings" && <Settings data={data} account={user} onSignedOut={accountSignedOut} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} saveAutomaticPausing={saveAutomaticPausing} />}
       </div>
-      <footer className="workspace-footer"><span>SteadySignal <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
+      <footer className="workspace-footer"><span>Click Cohere <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
       {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast("")} aria-label="Dismiss notification">×</button></div>}
     </main>
     {incidentDecision && <IncidentDecisionDialog incident={incidentDecision} campaignName={data.campaigns.find((item) => item.campaign.id === incidentDecision.campaignId)?.campaign.name} onCancel={() => setIncidentDecision(null)} onConfirm={() => {
@@ -986,6 +1015,11 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
     return () => { active = false; };
   }, [campaignId, refreshKey, reportVersion]);
 
+  useEffect(() => {
+    if (!loading && !error && detail?.run?.status === "COMPLETED" && detail.results?.length)
+      void recordReportView(detail.run.id);
+  }, [loading, error, detail?.run?.id, detail?.run?.status, detail?.results?.length]);
+
   if (loading) return <div className="center-state inline"><div className="spinner" /><p>Loading the latest QA report…</p></div>;
   if (error) return <div className="alert error" role="alert">{error} <Button onClick={() => window.location.reload()}>Retry</Button></div>;
   if (!detail) return null;
@@ -1195,12 +1229,14 @@ function Finding({ result, evidence }) {
     copy_quality: "Spelling and grammar · Ad copy"
   })[result.checkType] || result.checkType?.replaceAll("_", " ") || "Campaign check";
   const firstEvidence = evidence[0];
+  const evidenceMetadata = parseReportValue(firstEvidence?.metadataJson) || {};
+  const captureSources = Array.isArray(evidenceMetadata.captureSources) ? evidenceMetadata.captureSources : [];
   const copyIssues = result.checkType === "copy_quality" ? parseReportValue(result.observedJson)?.issues || [] : [];
   const campaignQuote = analysis.source_evidence || analysis.sourceEvidence || "";
   const pageQuote = analysis.page_evidence || analysis.pageEvidence || "";
   const showCapturedText = result.checkType !== "budget" && firstEvidence?.excerpt;
   const capturedTextLabel = firstEvidence?.evidenceType === "HTML_AND_META_FIELDS"
-    ? "View captured landing-page text"
+    ? "View captured page evidence"
     : result.checkType === "copy_quality" ? "View ad copy checked" : "View imported campaign details";
   return <article className={`finding ${statusTone(result.status)}`}>
     <button className="finding-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
@@ -1212,8 +1248,8 @@ function Finding({ result, evidence }) {
       <p className="finding-explanation">{reviewExplanation(result)}</p>
       {result.checkType !== "copy_quality" && <div className="evidence-grid"><div><span>What this check looks for</span><ul>{reportValueLines(result, "expected").map((line, index) => <li key={index}>{line}</li>)}</ul></div><div><span>What we found</span><ul>{reportValueLines(result, "observed").map((line, index) => <li key={index}>{line}</li>)}</ul></div></div>}
       {copyIssues.length > 0 && <ul className="copy-quality-issues">{copyIssues.map((issue, index) => <li key={`${issue.field}-${index}`}><strong>{issue.field === "headline" ? "Headline" : "Primary text"}</strong><p><del>{issue.original_text}</del> <span aria-hidden="true">→</span> <ins>{issue.correction}</ins></p><small>{issue.explanation}</small></li>)}</ul>}
-      {(campaignQuote || pageQuote) && <div className="quoted-evidence">{campaignQuote && <blockquote><span>From your campaign</span><p>{campaignQuote}</p></blockquote>}{hasCombinedLocationEvidence ? <blockquote><span>Offer and delivery evidence from the landing page</span><p>{analysis.offer_page_evidence && <>Offer terms: {analysis.offer_page_evidence}<br /></>}{analysis.service_page_evidence && <>Delivery or service: {analysis.service_page_evidence}</>}</p></blockquote> : pageQuote && <blockquote><span>From the landing page</span><p>{pageQuote}</p></blockquote>}</div>}
-      {showCapturedText && <details className="captured-evidence"><summary>{capturedTextLabel}</summary><blockquote><span>{firstEvidence.source || firstEvidence.evidenceType || "Source details"}</span><p>{firstEvidence.excerpt}</p></blockquote></details>}
+      {(campaignQuote || pageQuote) && <div className="quoted-evidence">{campaignQuote && <blockquote><span>From your campaign</span><p>{campaignQuote}</p></blockquote>}{hasCombinedLocationEvidence ? <blockquote><span>Offer and delivery evidence from captured sources</span><p>{analysis.offer_page_evidence && <>Offer terms: {analysis.offer_page_evidence}<br /></>}{analysis.service_page_evidence && <>Delivery or service: {analysis.service_page_evidence}</>}</p></blockquote> : pageQuote && <blockquote><span>From the landing page</span><p>{pageQuote}</p></blockquote>}</div>}
+      {showCapturedText && <details className="captured-evidence"><summary>{capturedTextLabel}</summary>{captureSources.length > 0 && <ul>{captureSources.map((source, index) => { const url = safeExternalUrl(source.url); return <li key={`${source.url}-${index}`}>{source.kind === "STORE_POLICY" ? "Store policy: " : "Landing page: "}{url ? <a href={url} target="_blank" rel="noreferrer">{source.title || source.url}</a> : source.title || "Source unavailable"}</li>; })}</ul>}{evidenceMetadata.supportingPageGaps && <p>Some linked policy pages could not be read. Review delivery and offer coverage before launch.</p>}<blockquote><span>{firstEvidence.source || firstEvidence.evidenceType || "Source details"}</span><p>{firstEvidence.excerpt}</p></blockquote></details>}
       <div className="suggested-step"><strong>Suggested next step</strong><p>{nextStep(result)}</p></div>
     </div>}
   </article>;
@@ -1373,11 +1409,13 @@ function IncidentCard({ incident, campaignName, actOnIncident, busy }) {
   </article>;
 }
 
-function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, savePreferences }) {
+function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, savePreferences, saveAutomaticPausing }) {
   const { meta, campaigns = [], preferences } = data;
   const simulation = preferences.autoPauseSimulation === true;
   const [pauseSimulations, setPauseSimulations] = useState([]);
   const [pauseHistoryError, setPauseHistoryError] = useState("");
+  const [showAutoPauseWarning, setShowAutoPauseWarning] = useState(false);
+  const [autoPauseWarningError, setAutoPauseWarningError] = useState("");
   useEffect(() => {
     if (!simulation) return;
     let active = true;
@@ -1390,13 +1428,21 @@ function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, 
   }, [data, simulation]);
   const connected = meta.connection?.status === "CONNECTED";
   const canPauseMetaCampaigns = connected && (simulation || meta.connection?.scopes?.includes("ads_management") === true);
+  const savingAutoPause = busy === "auto-pause";
+  const savingPreferences = busy === "preferences";
+  const confirmAutoPause = async () => {
+    setAutoPauseWarningError("");
+    const result = await saveAutomaticPausing(true);
+    if (result.ok) setShowAutoPauseWarning(false);
+    else setAutoPauseWarningError(result.message);
+  };
   const accounts = meta.accounts || [];
   return <>
     <PageHeading eyebrow="MAKE IT YOURS" title="Workspace settings" >Your connections, monitoring, and notifications. Just the way you need them.</PageHeading>
     <section className="panel settings-account"><div className="settings-title"><div className="section-title"><span className="integration-icon"><Icon name="meta" size={28} /></span><div><h2>Meta Ads</h2><p>Your campaign source, connected securely.</p></div></div><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Connected" : "Not connected"} /></div>
       <div className="settings-connection"><div><strong>{accounts.length} ad account{accounts.length === 1 ? "" : "s"} available</strong><p>{accounts.filter((account) => account.selected).length} selected for campaign sync</p></div>{meta.connection?.lastSyncAt && <small><Icon name="clock" size={14} /> Last synced {formatDate(meta.connection.lastSyncAt)}</small>}</div>
       {accounts.length > 0 && <details className="connected-accounts"><summary>View connected ad accounts <Icon name="chevron" size={15} /></summary><div className="account-details">{accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected && <span className="account-selected"><Icon name="check" size={12} /> Selected</span>}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>)}</div></details>}
-      {!accounts.length && <p className="muted-copy">{connected ? "Sync your account to discover available campaigns." : "Connect Meta Ads to bring your campaigns into SteadySignal."}</p>}
+      {!accounts.length && <p className="muted-copy">{connected ? "Sync your account to discover available campaigns." : "Connect Meta Ads to bring your campaigns into Click Cohere."}</p>}
       <div className="settings-actions">{meta.connection ? <>
         <Button icon="refresh" onClick={syncMeta} disabled={!connected || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : accounts.length ? "Refresh accounts" : "Discover ad accounts"}</Button>
         <Button icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Reconnect</Button><Button className="destructive-text" onClick={disconnectMeta}>Disconnect</Button>
@@ -1411,28 +1457,58 @@ function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, 
         <label className="toggle-row"><span><strong>Recovery updates</strong><small>When a new check verifies recovery.</small></span><input type="checkbox" name="recoveryAlertsEnabled" defaultChecked={preferences.recoveryAlertsEnabled} aria-label="Email me about recovery updates" /></label>
         <div className="auto-pause-setting">
           <label className="toggle-row auto-pause-row">
-            <span className="auto-pause-copy"><strong>{simulation ? "Simulate campaign pauses" : "Auto pause campaigns"}</strong><small id="auto-pause-description">{simulation ? "Record proposed pauses after two confirmed landing page failures and a fresh recheck." : "Pause monitored, active Meta campaigns after two confirmed landing page failures and a fresh recheck. If email delivery is enabled, a confirmation goes to your notification email."} Blocked or uncertain checks do not qualify.</small></span>
+            <span className="auto-pause-copy"><strong className="auto-pause-heading">Automatic campaign pausing <span className="auto-pause-beta-badge">Beta</span></strong><small id="auto-pause-description">{simulation ? "Record proposed pauses after confirmed page failures. This environment is in simulation mode." : "Pause monitored, active Meta campaigns after two confirmed page failures and a fresh check."} Blocked or uncertain checks do not qualify.</small></span>
             <span className="auto-pause-control">
-              <input type="checkbox" role="switch" name="autoPauseCampaignOnWebsiteDown" defaultChecked={preferences.autoPauseCampaignOnWebsiteDown} aria-label={simulation ? "Simulate campaign pauses after confirmed landing page failures" : "Automatically pause campaigns after confirmed landing page failures"} aria-describedby={`auto-pause-description auto-pause-disclaimer auto-pause-save-note${canPauseMetaCampaigns ? "" : " auto-pause-permission"}`} />
+              <input type="checkbox" role="switch" name="autoPauseCampaignOnWebsiteDown" checked={preferences.autoPauseCampaignOnWebsiteDown} disabled={savingAutoPause || savingPreferences || (!preferences.autoPauseCampaignOnWebsiteDown && !canPauseMetaCampaigns)} onChange={(event) => {
+                if (event.target.checked) { setAutoPauseWarningError(""); setShowAutoPauseWarning(true); }
+                else saveAutomaticPausing(false);
+              }} aria-label="Automatically pause campaigns after confirmed landing page failures" aria-describedby={`auto-pause-description auto-pause-disclaimer auto-pause-save-note${canPauseMetaCampaigns ? "" : " auto-pause-permission"}`} />
               <span className="auto-pause-state" aria-hidden="true"><span className="auto-pause-on">On</span><span className="auto-pause-off">Off</span></span>
             </span>
           </label>
           <div className="auto-pause-disclaimer" id="auto-pause-disclaimer" role="note">
             <Icon name="warning" size={18} />
-            <div><strong>{simulation ? "Simulation mode: campaigns keep running" : "This changes live campaigns"}</strong><p>{simulation ? "Proposed pauses appear below for review. Simulation does not stop ad spending during an outage." : "Confirmed failures can still be temporary. Campaigns stay paused until you reactivate them in Meta Ads, even after page recovery or switching auto pause off. Checks and Meta processing take time; ad spend can continue before a pause takes effect."}</p></div>
+            <div><strong>{simulation ? "Simulation mode: campaigns keep running" : "Beta feature: changes live campaigns"}</strong><p>{simulation ? "Proposed pauses appear below for review. Simulation does not stop ad spending during an outage." : "Review the beta warning before enabling. Paused campaigns must be restarted manually in Meta Ads."}</p></div>
           </div>
           {!canPauseMetaCampaigns && <p className="auto-pause-note" id="auto-pause-permission">{simulation ? "Connect Meta Ads to use pause simulation." : "Reconnect Meta Ads and allow campaign management to use auto pause."}</p>}
-          <p className="auto-pause-note" id="auto-pause-save-note">Changes take effect after you save preferences.</p>
+          <p className="auto-pause-note" id="auto-pause-save-note" role="status">{savingAutoPause ? "Saving automatic pausing…" : "This toggle saves immediately. Turning it off stops future automatic pauses and does not restart paused campaigns."}</p>
           {simulation && <div className="auto-pause-history" aria-label="Recent proposed campaign pauses"><strong>Recent proposed pauses</strong>
             {pauseHistoryError ? <p className="auto-pause-note" role="status">{pauseHistoryError}</p> : pauseSimulations.length ? <ul>{pauseSimulations.map((event) => <li key={event.id}><strong>{event.metadataJson?.campaignName || "Campaign"}</strong><small>{formatDate(event.createdAt)}</small><span>{event.metadataJson?.url}</span></li>)}</ul> : <p className="auto-pause-note">No proposed pauses recorded yet.</p>}
           </div>}
         </div>
-        <Button kind="primary" type="submit" disabled={busy === "preferences"}>{busy === "preferences" ? "Saving…" : "Save preferences"}</Button>
+        <Button kind="primary" type="submit" disabled={savingPreferences || savingAutoPause}>{savingPreferences ? "Saving…" : "Save preferences"}</Button>
       </form>
     </div>
     <AccountSettings account={account} request={request} onSignedOut={onSignedOut} />
-    <p className="security-note"><Icon name="shield" size={15} /> Your Meta connection is encrypted. SteadySignal never publishes ads.</p>
+    {showAutoPauseWarning && <AutoPauseBetaDialog simulation={simulation} pending={savingAutoPause} error={autoPauseWarningError} onCancel={() => { if (!savingAutoPause) setShowAutoPauseWarning(false); }} onConfirm={confirmAutoPause} />}
+    <p className="security-note"><Icon name="shield" size={15} /> Your Meta connection is encrypted. Click Cohere never publishes ads.</p>
   </>;
+}
+
+function AutoPauseBetaDialog({ simulation, pending, error, onCancel, onConfirm }) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    const element = dialog.current;
+    const previousFocus = document.activeElement;
+    element.showModal();
+    return () => {
+      element.close();
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+  return <dialog ref={dialog} className="incident-decision-dialog auto-pause-beta-dialog" aria-labelledby="auto-pause-beta-title" aria-describedby="auto-pause-beta-description" aria-busy={pending} onCancel={(event) => { event.preventDefault(); if (!pending) onCancel(); }} onClick={(event) => { if (!pending && event.target === event.currentTarget) onCancel(); }}>
+    <div className="incident-decision-content">
+      <span className="eyebrow">AUTOMATIC CAMPAIGN PAUSING · BETA</span>
+      <h2 id="auto-pause-beta-title">Enable automatic pausing?</h2>
+      <div id="auto-pause-beta-description">
+        <p>{simulation ? "This environment records proposed pauses in simulation mode. Your campaigns will keep running." : "Click Cohere can pause your monitored Meta campaigns after two confirmed website failures and a fresh check."}</p>
+        <p className="incident-decision-warning"><strong>This feature is still in beta.</strong> False detections may interrupt your campaigns. Review the findings and use it only if you are comfortable with automatic campaign changes.</p>
+        <p>Checks take time, so ad spend may continue before a pause. Campaigns stay paused after the page recovers or you turn this feature off. Restart them manually in Meta Ads.</p>
+      </div>
+      {error && <p className="alert error" role="alert">{error}</p>}
+      <div className="incident-decision-actions"><button type="button" className="button secondary" autoFocus disabled={pending} onClick={onCancel}>Cancel</button><button type="button" className="button primary" disabled={pending} onClick={onConfirm}>{pending ? "Enabling…" : "I understand, enable beta"}</button></div>
+    </div>
+  </dialog>;
 }
 
 function WebsiteRouter() {
@@ -1443,11 +1519,11 @@ function WebsiteRouter() {
     return () => window.removeEventListener("hashchange", updateRoute);
   }, []);
   useEffect(() => {
-    const titles = { home: "SteadySignal — Keep the promise behind every click", login: "Log in — SteadySignal", signup: "Create your workspace — SteadySignal", overview: "Campaign overview — SteadySignal", campaigns: "Your campaigns — SteadySignal", "site-watch": "Campaign watch — SteadySignal", incidents: "Incident report — SteadySignal", settings: "Workspace settings — SteadySignal", report: "Campaign QA report — SteadySignal" };
-    titles.billing = "Plan & usage - SteadySignal";
-    titles["forgot-password"] = "Recover your account — SteadySignal";
-    titles["reset-password"] = "Reset password — SteadySignal";
-    titles["delete-account"] = "Delete account — SteadySignal";
+    const titles = { home: "Click Cohere — Keep the promise behind every click", login: "Log in — Click Cohere", signup: "Create your workspace — Click Cohere", overview: "Campaign overview — Click Cohere", campaigns: "Your campaigns — Click Cohere", "site-watch": "Campaign watch — Click Cohere", incidents: "Incident report — Click Cohere", settings: "Workspace settings — Click Cohere", report: "Campaign QA report — Click Cohere" };
+    titles.billing = "Plan & usage - Click Cohere";
+    titles["forgot-password"] = "Recover your account — Click Cohere";
+    titles["reset-password"] = "Reset password — Click Cohere";
+    titles["delete-account"] = "Delete account — Click Cohere";
     document.title = titles[route.page];
     const anchor = route.page === "home" ? document.getElementById(window.location.hash.slice(1)) : null;
     if (anchor) anchor.scrollIntoView();
@@ -1456,7 +1532,7 @@ function WebsiteRouter() {
   return route.page === "home" ? <LandingPage /> : <App />;
 }
 
-createRoot(document.getElementById("root")).render(<React.StrictMode><WebsiteRouter /></React.StrictMode>);
+createRoot(document.getElementById("root")).render(<React.StrictMode><WebsiteRouter /><AnalyticsConsent /></React.StrictMode>);
 
 function AnalysisConfirmation({ estimate, onCancel, onConfirm }) {
   const dialog = useRef(null);

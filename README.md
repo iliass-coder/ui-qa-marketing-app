@@ -1,6 +1,6 @@
-# SteadySignal frontend
+# Click Cohere frontend
 
-Responsive React application for the SteadySignal campaign QA and landing-page monitoring product. This folder contains only the frontend; backend source and implementation remain in the separate backend project.
+Responsive React application for the Click Cohere campaign QA and landing-page monitoring product. This folder contains only the frontend; backend source and implementation remain in the separate backend project.
 
 ## Run locally
 
@@ -55,7 +55,7 @@ The campaign library imports published Meta campaigns, including paused campaign
 
 Google sign-in and sign-up are optional. Configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the backend, and register `${APP_ORIGIN}/login/oauth2/code/google` as the Google OAuth web client's authorized redirect URI. Set `GOOGLE_LOGIN_SUCCESS_URL` to the frontend URL after sign-in. For local development, keep the hostname consistent with `APP_ORIGIN` so the session cookie is shared (for example, `localhost` for both the backend and Vite).
 
-The access page supports account creation with email/password and Google. Email/password registration creates an isolated workspace and requires `EMAIL_VERIFICATION_ENABLED=true` plus working SMTP settings. Google sign-up creates a workspace immediately using the verified Google address; it does not require SMTP. New passwords must be at least 16 characters. `ADMIN_EMAIL` and `ADMIN_PASSWORD` only seed the initial owner on an empty database; they do not control later sign-ups.
+The access page supports account creation with email/password and Google. Email/password registration creates an isolated workspace and requires `EMAIL_VERIFICATION_ENABLED=true` plus working SMTP settings. Google sign-up creates a workspace immediately using the verified Google address; it does not require SMTP. New passwords must be at least 8 characters. `ADMIN_EMAIL` and `ADMIN_PASSWORD` only seed the initial owner on an empty database; they do not control later sign-ups.
 
 For production SSO, the same public app host must route `/api/**`, `/oauth2/**`, and `/login/oauth2/**` to the backend. The Google OAuth web client redirect URI is `${APP_ORIGIN}/login/oauth2/code/google`; Meta continues to use `${APP_ORIGIN}/api/integrations/meta/callback`.
 
@@ -74,3 +74,9 @@ The UI uses the existing backend routes for login/session, Meta connection and s
 `/#/billing` shows trial status, analysis reservations and balances, monitored-page limits, selected-account limits, and usage by Meta account. Stripe hosts checkout, subscription changes, payment methods, invoices, and cancellation. Public pricing and FAQs explain the 10-analysis preview, card-free 14-day monitoring trial, Starter ($39), Growth ($99), and Agency by arrangement. Plan intent survives signup. Campaign QA confirms the analysis count before a run; the account picker enforces the displayed account allowance.
 
 Set up the backend using [the billing guide](../qa-marketing-integration/docs/billing.md). Paid checkout stays unavailable until its two Stripe secrets are configured.
+
+## Product analytics
+
+Optional website visit tracking starts after **Allow analytics** and can be changed through **Privacy choices**. Requests use the same-origin backend; no private PostHog key or session recording code is included in the frontend. Completed QA report views are recorded as workspace outcomes. The backend also records signup, monitoring, trial, and confirmed subscription milestones.
+
+See the [analytics setup and testing guide](../qa-marketing-integration/docs/analytics.md) for the three dashboard definitions, test mode, and verification commands. The [private dashboard](https://us.posthog.com/project/687804/dashboard/2258445) shows landing-page views, the landing-page-to-signup rate, and plan buyers. All three cover the last 30 days and show current-day activity without a cohort waiting period. Plan buyers count each workspace once after its first confirmed live Stripe subscription payment. Development activity, Stripe test payments, and explicitly labeled test events are excluded.

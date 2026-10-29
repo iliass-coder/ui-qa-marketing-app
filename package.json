@@ -1,12 +1,12 @@
 {
-  "name": "steadysignal-frontend",
+  "name": "clickcohere-frontend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "test": "node --test test/domain.test.js test/routes.test.js"
+    "test": "node --test test/domain.test.js test/routes.test.js test/analytics.test.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

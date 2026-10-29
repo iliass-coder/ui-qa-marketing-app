@@ -1,8 +1,8 @@
-# SteadySignal landing page — design and content
+# Click Cohere landing page — design and content
 
 ## Central idea
 
-A paid click is a handoff between an ad's promise and a landing page. Make that handoff the visual and editorial signature of SteadySignal. Speak to people running Meta campaigns who need to review destinations before launch and monitor them afterward.
+A paid click is a handoff between an ad's promise and a landing page. Make that handoff the visual and editorial signature of Click Cohere. Speak to people running Meta campaigns who need to review destinations before launch and monitor them afterward.
 
 ## Hero — final copy
 
@@ -22,11 +22,11 @@ Supporting line: Read-only campaign checks. Optional campaign pausing.
 
 - Preserve the ivory, slate, coral, sage, and muted blue palette of the application.
 - Use the same locally hosted Manrope and Inter fonts, with a larger editorial scale for the public page.
-- Pair a generous, left-aligned headline with a bespoke product illustration: the ad's promise and its destination, connected through a SteadySignal finding.
+- Pair a generous, left-aligned headline with a bespoke product illustration: the ad's promise and its destination, connected through a Click Cohere finding.
 - Let visitors switch the illustration between **Before launch** and **After launch**. Clearly label all sample data as an illustrative example.
 - Use fine rules, numbered sections, small evidence labels, and a dark monitoring section. Keep the presentation calm and spacious.
 - Navigation: Product, How it works, Questions, Log in, Get started. On phones, provide an accessible menu.
-- Reuse the wave brand mark and the application's line icons.
+- Use the linked C brand mark and Click Cohere wordmark consistently, alongside the application's line icons.
 
 ## Page story and final section copy
 
@@ -48,7 +48,7 @@ Feature headings and descriptions:
 
 Start a campaign watch to keep checking its current destinations. Each scheduled run refreshes the campaign from Meta before inspecting the pages.
 
-Facts: Paid inspections every 15 minutes; free preview inspections every 30 minutes. Current Meta destinations. Changes recorded as incidents.
+Facts: Paid inspections every 30 minutes; free preview inspections every hour. Current Meta destinations. Changes recorded as incidents.
 
 Action: Explore campaign watch → after-launch example.
 
@@ -62,13 +62,13 @@ Action: Explore campaign watch → after-launch example.
 
 ### Questions
 
-**Does SteadySignal change my ads?**
+**Does Click Cohere change my ads?**
 
 Campaign checks do not publish ads or edit creative. You can separately enable automatic pausing after repeated landing-page failures. That option requires Meta permission and two consecutive failed checks.
 
 **How often are destinations checked?**
 
-Paid campaign watches are scheduled every 15 minutes; the free monitoring preview uses a 30-minute interval. Each run refreshes the campaign's current destinations from Meta before inspecting them.
+Paid campaign watches are scheduled every 30 minutes; the free monitoring preview uses a one-hour interval. Each run refreshes the campaign's current destinations from Meta before inspecting them.
 
 **What if a detail cannot be verified?**
 
@@ -76,7 +76,7 @@ It is marked “Could not confirm.” Some content comparisons use an optional A
 
 **Does it test the whole checkout?**
 
-SteadySignal inspects the HTML served by the destination page. It does not complete purchases or validate the checkout flow. Dynamic or ambiguous details may need your review.
+Click Cohere inspects the HTML served by the destination page. It does not complete purchases or validate the checkout flow. Dynamic or ambiguous details may need your review.
 
 ### Closing action
 
@@ -102,7 +102,7 @@ Product claims were checked against the current application and backend document
 
 ## Composition references
 
-[Plain](https://www.plain.com/) and [incident.io](https://incident.io/) informed the use of a clear product story and product-focused examples. The headline, copy, illustrations, and page composition are original to SteadySignal.
+[Plain](https://www.plain.com/) and [incident.io](https://incident.io/) informed the use of a clear product story and product-focused examples. The headline, copy, illustrations, and page composition are original to Click Cohere.
 
 ## Pricing update
 

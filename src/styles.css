@@ -44,7 +44,7 @@ h1, h2, h3 { font-family: var(--font-display); }
 .sidebar { width: 246px; position: fixed; inset: 0 auto 0 0; background: var(--rail); color: var(--paper); display: flex; flex-direction: column; padding: 34px 20px 20px; z-index: 20; }
 .brand-link { padding: 0 8px; text-decoration: none; margin-bottom: 35px; }
 .brand { display: flex; align-items: center; gap: 11px; }
-.brand-mark { width: 36px; height: 38px; background: var(--coral); color: var(--white); border-radius: 10px; display: grid; place-items: center; flex: 0 0 auto; }
+.brand-mark { width: 36px; height: 36px; background: var(--coral); color: var(--white); border-radius: 10px; display: grid; place-items: center; flex: 0 0 auto; }
 .brand-mark svg { width: 29px; height: 29px; }
 .brand-name { font-family: var(--font-display); font-size: 21px; font-weight: 500; letter-spacing: -.8px; line-height: 1.1; white-space: nowrap; }
 .brand-name > span { font-weight: 750; }
@@ -341,6 +341,9 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
 .auto-pause-setting { padding-bottom: 14px; }
 .auto-pause-row { align-items: flex-start; gap: 16px; }
 .auto-pause-copy { flex: 1; min-width: 0; }
+.auto-pause-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.auto-pause-beta-badge { padding: 2px 7px; border: 1px solid #e8d7b7; border-radius: 999px; background: #f8f0e3; color: #725b35; font-size: 10px; font-weight: 600; line-height: 1.4; }
+.auto-pause-control input:disabled { cursor: not-allowed; opacity: .55; }
 .auto-pause-row > .auto-pause-control { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-height: 24px; }
 .auto-pause-control input { width: 40px; height: 24px; border-radius: 14px; }
 .auto-pause-control input::after { width: 18px; height: 18px; }
@@ -408,6 +411,7 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
 .login-divider { display: flex; align-items: center; gap: 15px; color: #8a958d; font-size: 11px; margin: 0 0 26px; }
 .login-divider::before, .login-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .login-card > .fine-print { display: flex; align-items: center; justify-content: center; gap: 6px; color: #849087; font-size: 11px; margin: 17px 0 0; }
+.login-card > .signup-policies { font-size: 12px; margin: 0 0 22px; }
 .login-card > .auth-switch { text-align: center; font-size: 12px; margin: 28px 0 0; }
 .login-form-foot { font-size: 10px; color: #849087; margin: 25px 0 0; }
 .resend-verification { width: 100%; margin-top: 16px; }

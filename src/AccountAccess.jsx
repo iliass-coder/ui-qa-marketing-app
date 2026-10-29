@@ -57,18 +57,18 @@ export function RecoveryPage({ mode, token = "", request, enabled, account, onSi
       setBusy(false);
     }
   };
-  return <main className="recovery-page"><a href="/" className="recovery-brand" aria-label="SteadySignal home"><Brand /></a>
+  return <main className="recovery-page"><a href="/" className="recovery-brand" aria-label="Click Cohere home"><Brand /></a>
     <section className="panel recovery-card">
       <span className="settings-section-icon"><Icon name={deleting ? "warning" : "shield"} size={22} /></span>
       <h1>{deleting ? "Delete your account" : resetting ? "Choose a new password" : "Forgot your password?"}</h1>
-      <p>{deleting ? `Confirm deletion of ${account?.user?.email || "your account"}. This action is permanent.` : resetting ? "Use at least 16 characters. All devices will be signed out after the reset." : "Enter your account email and we will send you a password reset link."}</p>
+      <p>{deleting ? `Confirm deletion of ${account?.user?.email || "your account"}. This action is permanent.` : resetting ? "Use at least 8 characters. All devices will be signed out after the reset." : "Enter your account email and we will send you a password reset link."}</p>
       {error && <div className="alert error" role="alert">{error}</div>}
       {notice && <div className="alert success" role="status">{notice}</div>}
       {deleting && <div className="alert" role="note">{account?.workspaceMemberCount === 1 ? "You are the last workspace member. Your workspace, imported campaigns, monitoring history, and stored Meta connection will be permanently deleted." : "Your account and all its sessions will be deleted. Other members will retain access to the shared workspace."} Your campaigns in Meta will remain in their current state, including any campaigns already paused.</div>}
       {(resetting || deleting) && !validToken ? <div className="alert error" role="alert">This confirmation link is missing or invalid. {resetting ? <a href="#/forgot-password">Request a new reset link.</a> : <a href="#/settings">Request a new deletion email from settings.</a>}</div> : <form className="form-stack" onSubmit={submit}>
         {deleting ? <label>Type DELETE to confirm<input name="confirmation" autoComplete="off" required pattern="DELETE" maxLength="6" /></label> : resetting ? <>
-          <label>New password<input type="password" name="password" autoComplete="new-password" required minLength="16" maxLength="200" /></label>
-          <label>Confirm new password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="16" maxLength="200" /></label>
+          <label>New password<input type="password" name="password" autoComplete="new-password" required minLength="8" maxLength="200" /></label>
+          <label>Confirm new password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="8" maxLength="200" /></label>
         </> : <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" /></label>}
         <button className={`button ${deleting ? "danger" : "primary"}`} disabled={busy || (!deleting && !resetting && enabled !== true)} type="submit">{busy ? "Working…" : deleting ? "Permanently delete my account" : resetting ? "Reset password" : "Send reset link"}</button>
       </form>}
@@ -125,9 +125,9 @@ export function AccountSettings({ account, request, onSignedOut }) {
       <h3>Change password</h3>
       <input type="text" name="username" autoComplete="username" value={account.user.email} className="sr-only" readOnly tabIndex="-1" aria-hidden="true" />
       <label>Current password<input type="password" name="currentPassword" autoComplete="current-password" required maxLength="200" /></label>
-      <label>New password<input type="password" name="newPassword" autoComplete="new-password" required minLength="16" maxLength="200" /></label>
-      <label>Confirm new password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="16" maxLength="200" /></label>
-      <p className="account-help">Use at least 16 characters. Changing your password signs out all devices.</p>
+      <label>New password<input type="password" name="newPassword" autoComplete="new-password" required minLength="8" maxLength="200" /></label>
+      <label>Confirm new password<input type="password" name="confirmPassword" autoComplete="new-password" required minLength="8" maxLength="200" /></label>
+      <p className="account-help">Use at least 8 characters. Changing your password signs out all devices.</p>
       <button className="button secondary" disabled={Boolean(busy)} type="submit">{busy === "password" ? "Updating…" : "Change password"}</button>
       {emailEnabled && <button className="text-button account-reset-link" type="button" disabled={Boolean(busy)} onClick={() => sendEmail(false)}>Forgot your current password? Send a reset link</button>}
     </form> : <div className="account-password-form"><h3>Add a password</h3><p className="account-help">You use Google to sign in. An email link lets you add a password for email sign-in.</p><button className="button secondary" disabled={Boolean(busy) || !emailEnabled} onClick={() => sendEmail(false)}>Send password setup link</button></div>}
