@@ -10,6 +10,8 @@ import { resolveRoute } from "./routes.js";
 import { watchSessionActivity } from "./session.js";
 import { AnalyticsConsent } from "./AnalyticsConsent.jsx";
 import { recordReportView } from "./analytics.js";
+import { QaNotifications, QaProgress, useQaChecks } from "./QaChecks.jsx";
+import { isQaActive, latestQaRun } from "./qaRuns.js";
 import { INCIDENT_REPORT_LIMIT, INCIDENT_TYPES, groupIncidents, incidentReportHref, incidentType, incidentTypeLabel, incidentValueText } from "./incidents.js";
 import "./styles.css";
 import "./overview.css";
@@ -40,8 +42,8 @@ const request = async (path, options = {}) => {
       AD_ACCOUNT_LIMIT_REACHED: "Your plan does not cover this many Meta accounts. Select fewer accounts or upgrade in Plan & usage.",
       TRIAL_EXPIRED: "Your monitoring trial has ended. Choose a plan in Plan & usage to resume your watches.",
       MONITORING_NOT_ENABLED: "Start a watch for this campaign before requesting a monitoring recheck.",
-      BILLING_NOT_CONFIGURED: "Paid checkout is not available yet. Contact your workspace administrator.",
-      STRIPE_REQUEST_FAILED: "Stripe could not complete this request. Try again or contact your workspace administrator.",
+      BILLING_NOT_CONFIGURED: "Paid checkout is not available yet. Contact support.",
+      STRIPE_REQUEST_FAILED: "Stripe could not complete this request. Try again or contact support.",
       STRIPE_UNAVAILABLE: "Stripe is temporarily unavailable. Your current plan has not changed; try again shortly.",
       SUBSCRIPTION_REQUIRED: "Choose a paid plan before purchasing additional analyses.",
       INTENTIONAL_SETTING_NOT_ACTIVE: "This incident type is already using normal monitoring. Refresh to see its current status.",
@@ -53,7 +55,7 @@ const request = async (path, options = {}) => {
       EMAIL_NOT_VERIFIED: "Verify your email using the link we sent before signing in.",
       EMAIL_ALREADY_REGISTERED: "An account already uses this email. Sign in instead.",
       GOOGLE_NOT_CONFIGURED: "Google sign-in is not configured on the backend yet.",
-      ACCOUNT_RECOVERY_NOT_CONFIGURED: "Recovery email is currently unavailable. Contact your workspace administrator.",
+      ACCOUNT_RECOVERY_NOT_CONFIGURED: "Recovery email is currently unavailable. Contact support.",
       INVALID_OR_EXPIRED_RESET: "This password reset link is invalid, expired, or already used. Request a new link.",
       INVALID_OR_EXPIRED_DELETION: "This deletion link is invalid, expired, or already used. Request a new confirmation email in settings.",
       CURRENT_PASSWORD_INCORRECT: "Your current password was not accepted.",
@@ -63,7 +65,7 @@ const request = async (path, options = {}) => {
       META_TOKEN_EXPIRED: "Meta access has expired. Reconnect Meta Ads in settings.",
       META_RECONNECT_REQUIRED: "Reconnect Meta Ads in settings to restore access.",
       RATE_LIMITED: "Too many requests. Wait a minute and try again.",
-      GOOGLE_ACCOUNT_NOT_AUTHORIZED: "No account uses that Google email yet. Switch to sign up to create a workspace."
+      GOOGLE_ACCOUNT_NOT_AUTHORIZED: "No account uses that Google email yet. Switch to sign up to create an account."
     })[detail] || fallbackDetail || detail;
     const error = new Error(detail || `Request failed (${response.status})`);
     error.code = errorCode;
@@ -132,7 +134,7 @@ function App() {
     return { ssoError: params.get("sso_error"), emailVerified: params.get("email_verified") };
   });
   const [loginError, setLoginError] = useState(() => authCallback.ssoError === "no_account"
-    ? "No workspace uses that Google email yet. Switch to Sign up to create one."
+    ? "No account uses that Google email yet. Switch to Sign up to create one."
     : authCallback.ssoError ? "Google sign-in could not be completed. Please try again." : "");
   const [loginNotice, setLoginNotice] = useState(() => authCallback.emailVerified === "success"
     ? "Email verified. You can sign in now."
@@ -148,7 +150,6 @@ function App() {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState("");
-  const [qaConfirmation, setQaConfirmation] = useState(null);
   const [incidentDecision, setIncidentDecision] = useState(null);
   const [toast, setToast] = useState("");
   const authGeneration = useRef(0);
@@ -267,7 +268,6 @@ function App() {
           method: "POST",
           body: {
             name: form.get("name"),
-            workspaceName: form.get("workspaceName"),
             email: form.get("email"),
             password: form.get("password")
           }
@@ -356,27 +356,33 @@ function App() {
     });
   }, [auth, accountSignedOut]);
 
-  const runQa = async (campaignId) => {
-    setBusy(`estimate:${campaignId}`); setLoadError("");
-    try { const estimate = await request(`/api/campaigns/${campaignId}/qa-estimate`); setQaConfirmation({ campaignId, ...estimate }); }
-    catch (error) { setLoadError(error.message); }
-    finally { setBusy(""); }
-  };
+  const qaChecks = useQaChecks({
+    scope: auth === "signed-in" && user?.accountId && user?.user?.id ? `${user.accountId}:${user.user.id}` : null,
+    campaigns: data?.campaigns,
+    request,
+    onSettled: () => { loadApp().catch(() => {}); },
+    onExpired: () => accountSignedOut("Your session expired. Sign in again to see your check's status."),
+  });
 
-  const executeQa = async (campaignId) => {
+  const runQa = async (campaignId) => {
+    if (busy) return;
+    if (qaChecks.runs.some((run) => run.campaignId === campaignId && isQaActive(run))) {
+      navigate(`report/${campaignId}`);
+      return;
+    }
+    const generation = authGeneration.current;
     setBusy(`qa:${campaignId}`);
     setLoadError("");
     try {
       const run = await request(`/api/campaigns/${campaignId}/qa-runs`, { method: "POST" });
-      const complete = await waitFor("/api/qa-runs", run.id);
-      if (complete.status === "FAILED") throw new Error(complete.errorMessage || "The QA run failed.");
-      await reload();
-      setToast("QA is complete. The report shows backend findings and evidence.");
+      if (generation !== authGeneration.current) return;
+      qaChecks.track(run, data.campaigns.find((item) => item.campaign.id === campaignId)?.campaign.name || "Campaign");
+      setData((current) => current ? { ...current, campaigns: current.campaigns.map((item) => item.campaign.id === campaignId ? { ...item, lastQa: run } : item) } : current);
       navigate(`report/${campaignId}`);
     } catch (error) {
-      setLoadError(error.message);
+      if (generation === authGeneration.current) setLoadError(error.message);
     } finally {
-      setBusy("");
+      if (generation === authGeneration.current) setBusy((current) => current === `qa:${campaignId}` ? "" : current);
     }
   };
 
@@ -507,7 +513,7 @@ function App() {
     try {
       const result = await request(`/api/incidents/${incident.id}/${action}`, {
         method: "POST",
-        ...(action === "mark-intentional" ? { body: { note: "Marked intentional until explicitly reverted by a workspace member." } } : {})
+        ...(action === "mark-intentional" ? { body: { note: "Marked intentional until this decision is explicitly reverted." } } : {})
       });
       if (action === "revert-intentional" && result?.recheckQueued === false) {
         await reload(); setToast("Intentional setting reverted. Resume monitoring coverage to request a fresh inspection."); return;
@@ -556,12 +562,12 @@ function App() {
   }
   if (auth === "signed-out") {
     return <main className="login-page"><aside className="login-story"><a href="/" className="login-brand" aria-label="Click Cohere home"><Brand /></a><div className="login-story-copy"><div className="health-kicker">EVERY CLICK, CONNECTED</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>Click Cohere</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Your ad. Your page. One connected story.</div></aside><div className="login-form-region"><section className="login-card">
-      <div className="eyebrow">YOUR CAMPAIGN WORKSPACE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start with 10 ad analyses and a 14-day monitoring preview. No credit card required." : "Sign in and see how your campaigns are doing."}</p>
+      <div className="eyebrow">CAMPAIGN ASSURANCE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start with 10 ad analyses and a 14-day monitoring preview. No credit card required." : "Sign in and see how your campaigns are doing."}</p>
       {loadError && <div className="alert error" role="alert">{loadError} Check that the backend is running, then try again.</div>}
       {loginError && <div className="alert error" role="alert">{loginError}</div>}
       {loginNotice && <div className="alert success" role="status">{loginNotice}</div>}
       {route.page === "delete-account" && <div className="alert" role="status">Sign in to the account you requested to delete. If you use Google, reopen the link in your deletion email after signing in.</div>}
-      {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your workspace." : "Email registration is currently unavailable. Contact your workspace administrator."}</div>}
+      {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your account." : "Email registration is currently unavailable. Contact support."}</div>}
       {authMode === "signup" && <p className="signup-policies">By creating an account, including with Google, you agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms</a>. Read our <a href="/privacy.html" target="_blank" rel="noopener">Privacy notice</a> and <a href="/refunds.html" target="_blank" rel="noopener">Refunds &amp; cancellation policy</a>.</p>}
       {googleEnabled && <>
         <Button type="button" className="google-button" onClick={startGoogleAuth}>
@@ -572,7 +578,6 @@ function App() {
       <form key={authMode} onSubmit={login} className="form-stack">
         {authMode === "signup" && <>
           <label>Your name<input type="text" name="name" autoComplete="name" required maxLength="80" /></label>
-          <label>Workspace name<input type="text" name="workspaceName" autoComplete="organization" required minLength="2" maxLength="80" /></label>
         </>}
         <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" value={authEmail} onChange={(event) => { setAuthEmail(event.target.value); setCanResendVerification(false); }} /></label>
         <label>Password<input type="password" name="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} required minLength={authMode === "signup" ? 8 : undefined} maxLength="200" /></label>
@@ -584,22 +589,27 @@ function App() {
       <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to Click Cohere?"} <a className="text-button" href={authMode === "signup" ? "#/login" : "#/signup"} onClick={() => setLoginError("")}>{authMode === "signup" ? "Sign in" : "Create an account"}</a></p>
     </section><p className="login-form-foot">Click Cohere · Campaign assurance, made clear.</p></div></main>;
   }
-  if (route.page === "login" || route.page === "signup") return <main className="center-state"><div className="spinner" /><p>Opening your workspace…</p></main>;
-  if (!data) return <main className="center-state"><div className="spinner" /><p>Loading workspace data…</p>{loadError && <p role="alert">{loadError} <button className="text-button" onClick={reload}>Try again</button></p>}</main>;
+  if (route.page === "login" || route.page === "signup") return <main className="center-state"><div className="spinner" /><p>Opening your account…</p></main>;
+  if (!data) return <main className="center-state"><div className="spinner" /><p>Loading your campaigns…</p>{loadError && <p role="alert">{loadError} <button className="text-button" onClick={reload}>Try again</button></p>}</main>;
 
   const connection = data.meta?.connection;
   const connected = connection?.status === "CONNECTED";
   const lastSync = connection?.lastSyncAt ? new Date(connection.lastSyncAt).getTime() : null;
   const metaSyncIsStale = connected && lastSync && Date.now() - lastSync > 24 * 60 * 60 * 1000;
   const activeNav = route.page === "report" ? "campaigns" : route.page;
+  const campaignData = { ...data, campaigns: data.campaigns.map((item) => {
+    const tracked = qaChecks.runs.find((run) => run.campaignId === item.campaign.id);
+    const run = latestQaRun(item.lastQa, tracked);
+    return isQaActive(run) ? { ...item, lastQa: run, qaState: "Checking", verdict: "RUNNING" } : item;
+  }) };
+  const trackedReportRun = qaChecks.runs.find((run) => run.campaignId === route.id);
+  const reportRun = campaignData.campaigns.find((item) => item.campaign.id === route.id)?.lastQa;
 
   return <div className="app-shell">
-    {qaConfirmation && <AnalysisConfirmation estimate={qaConfirmation} onCancel={() => setQaConfirmation(null)} onConfirm={() => { const id = qaConfirmation.campaignId; setQaConfirmation(null); executeQa(id); }} />}
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
     <aside className="sidebar">
       <a href="#/overview" className="brand-link" aria-label="Click Cohere overview"><Brand /></a>
-      <div className="workspace-card"><span className="workspace-monogram">{(user?.workspace?.name || "W").slice(0, 1).toUpperCase()}</span><span><strong>{user?.workspace?.name || "My workspace"}</strong><small>Campaign workspace</small></span></div>
-      <div className="nav-caption">WORKSPACE</div>
+      <div className="nav-caption">MENU</div>
       <nav className="main-nav" aria-label="Main navigation">
         <NavItem id="overview" active={activeNav === "overview"} icon="overview" label="Overview" />
         <NavItem id="campaigns" active={activeNav === "campaigns"} icon="campaigns" label="Campaigns" count={data.campaigns.length} />
@@ -614,14 +624,15 @@ function App() {
         <p>{connected ? `${data.meta?.accounts?.length || 0} ad accounts available` : "Bring your campaigns into one clear view."}</p>
         <a href="#/settings">Manage connection <Icon name="arrow" size={14} /></a>
       </div>
-      <div className="sidebar-bottom"><span className="user-avatar">{(user?.user?.name || "U").slice(0, 1).toUpperCase()}</span><span className="user-copy"><strong>{user?.user?.name || "Workspace member"}</strong><small>Your workspace</small></span><button className="icon-button" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={18} /></button></div>
+      <div className="sidebar-bottom"><span className="user-avatar">{(user?.user?.name || "U").slice(0, 1).toUpperCase()}</span><span className="user-copy"><strong>{user?.user?.name || "Your account"}</strong><small>Your account</small></span><button className="icon-button" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={18} /></button></div>
     </aside>
     <main className="main-area">
       <header className="topbar">
-        <div className="breadcrumbs"><Icon name={activeNav === "site-watch" ? "watch" : activeNav === "incidents" ? "warning" : activeNav} size={17} /><span>Workspace</span><Icon name="chevron" size={12} /><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page === "incidents" ? "Incident report" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
-        <div className="topbar-right"><span className="workspace-date"><Icon name="calendar" size={15} />{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date())}</span><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta connected" : "Meta disconnected"} /><button className="icon-button mobile-signout" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={17} /></button></div>
+        <div className="breadcrumbs"><Icon name={activeNav === "site-watch" ? "watch" : activeNav === "incidents" ? "warning" : activeNav} size={17} /><span>Click Cohere</span><Icon name="chevron" size={12} /><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page === "incidents" ? "Incident report" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
+        <div className="topbar-right"><span className="app-date"><Icon name="calendar" size={15} />{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date())}</span><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta connected" : "Meta disconnected"} /><button className="icon-button mobile-signout" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={17} /></button></div>
       </header>
       <div className={`page-content page-${route.page}`} id="main-content" tabIndex="-1">
+        <QaNotifications runs={qaChecks.runs} route={route} onDismiss={qaChecks.dismiss} />
         {!connection && <div className="alert connection-alert" role="status"><div><strong>Meta account disconnected</strong><span>Connect Meta to import real campaigns and run prelaunch QA.</span></div><Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
         <BillingNotice billing={data.billing} />
         <MetaConnectionNotice meta={data.meta} />
@@ -630,14 +641,14 @@ function App() {
         {metaSyncIsStale && <div className="alert stale-alert" role="status">Meta campaign data was last synced {formatDate(connection.lastSyncAt)}. Sync now before relying on campaign status.</div>}
         {loadError && <div className="alert error" role="alert"><span>{loadError}</span><button className="alert-close" aria-label="Dismiss error" onClick={() => setLoadError("")}>×</button></div>}
         {route.page === "billing" && <BillingPage billing={data.billing} request={request} reload={reload} route={route} />}
-        {route.page === "overview" && <Overview data={data} busy={busy} runQa={runQa} syncMeta={syncMeta} />}
-        {route.page === "campaigns" && <Campaigns data={data} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} syncMeta={syncMeta} selectMetaAccounts={saveMetaAccounts} />}
-        {route.page === "report" && <QaReport campaignId={route.id} refreshKey={data.campaigns?.find((item) => item.campaign?.id === route.id)?.lastQa?.id || ""} runQa={runQa} busy={busy} />}
+        {route.page === "overview" && <Overview data={campaignData} busy={busy} runQa={runQa} syncMeta={syncMeta} />}
+        {route.page === "campaigns" && <Campaigns data={campaignData} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} syncMeta={syncMeta} selectMetaAccounts={saveMetaAccounts} />}
+        {route.page === "report" && <QaReport campaignId={route.id} refreshKey={`${reportRun?.id}:${reportRun?.status}:${trackedReportRun?.id}:${trackedReportRun?.status}:${connection?.lastSyncAt}`} trackedRun={trackedReportRun} trackRun={qaChecks.track} runQa={runQa} busy={busy} meta={data.meta} syncMeta={syncMeta} />}
         {route.page === "site-watch" && <SiteWatch data={data} selectedCampaignId={route.campaignId} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
         {route.page === "incidents" && <IncidentReport data={data} route={route} busy={busy} actOnIncident={actOnIncident} />}
         {route.page === "settings" && <Settings data={data} account={user} onSignedOut={accountSignedOut} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} saveAutomaticPausing={saveAutomaticPausing} />}
       </div>
-      <footer className="workspace-footer"><span>Click Cohere <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
+      <footer className="app-footer"><span>Click Cohere <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
       {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast("")} aria-label="Dismiss notification">×</button></div>}
     </main>
     {incidentDecision && <IncidentDecisionDialog incident={incidentDecision} campaignName={data.campaigns.find((item) => item.campaign.id === incidentDecision.campaignId)?.campaign.name} onCancel={() => setIncidentDecision(null)} onConfirm={() => {
@@ -675,6 +686,15 @@ function IncidentDecisionDialog({ incident, campaignName, onCancel, onConfirm })
 
 function NavItem({ id, active, icon, label, count }) {
   return <a className={`nav-item ${active ? "active" : ""}`} href={`#/${id}`} aria-current={active ? "page" : undefined} title={label}><Icon name={icon} size={19} /><span className="nav-label">{label}</span>{count != null && <span className="nav-count">{count}</span>}</a>;
+}
+
+function CampaignSyncReminder({ connection, busy, syncMeta }) {
+  if (connection?.status !== "CONNECTED") return null;
+  return <section className="campaign-sync-reminder" aria-label="Sync campaign changes from Meta">
+    <span className="campaign-sync-icon" aria-hidden="true"><Icon name="refresh" size={21} /></span>
+    <div className="campaign-sync-copy"><strong>Changed something in Meta? Sync before checking.</strong><p>Campaign checks use the data from your last sync. Sync to import your latest published changes, then run a new check.</p><small>{connection.lastSyncAt ? <>Last synced from Meta: <time dateTime={connection.lastSyncAt}>{formatDate(connection.lastSyncAt)}</time></> : "Your campaigns have not been synced yet."}</small></div>
+    <Button kind="primary" icon="refresh" onClick={syncMeta} disabled={Boolean(busy)}>{busy === "sync" ? "Syncing campaigns…" : "Sync campaigns"}</Button>
+  </section>;
 }
 
 function Overview({ data, busy, runQa, syncMeta }) {
@@ -722,7 +742,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
 
   return <>
     <div className="overview-heading">
-      <div><div className="eyebrow">YOUR WORKSPACE</div><h1>Overview<span className="overview-title-dot">.</span></h1><p>Your campaigns and next steps, at a glance.</p></div>
+      <div><div className="eyebrow">YOUR CAMPAIGNS</div><h1>Overview<span className="overview-title-dot">.</span></h1><p>Your campaigns and next steps, at a glance.</p></div>
       <div className="overview-signal-art" aria-hidden="true">
         <svg viewBox="0 0 340 132" fill="none" focusable="false">
           <g className="overview-signal-guides"><path d="M12 66h316M242 5v122" /><circle cx="242" cy="66" r="57" /><circle cx="242" cy="66" r="38" /><circle cx="242" cy="66" r="19" /></g>
@@ -730,19 +750,18 @@ function Overview({ data, busy, runQa, syncMeta }) {
           <circle className="overview-signal-node" cx="299" cy="66" r="4" /><circle className="overview-signal-orbit" cx="242" cy="9" r="3" />
         </svg>
       </div>
-      {connected
-        ? <Button className="overview-sync" icon="refresh" onClick={syncMeta} disabled={Boolean(busy)}>{busy === "sync" ? "Syncing campaigns…" : "Sync campaigns"}</Button>
-        : <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}
+      {!connected && <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}
     </div>
+    <CampaignSyncReminder connection={meta.connection} busy={busy} syncMeta={syncMeta} />
 
-    <section className="overview-metrics" aria-label="Workspace summary">
+    <section className="overview-metrics" aria-label="Campaign summary">
       <OverviewMetric label="Campaigns" value={campaigns.length} note={selectedAccounts ? `Across ${selectedAccounts} ad account${selectedAccounts === 1 ? "" : "s"}` : "Your imported campaigns"} icon="campaigns" tone="total" href="#/campaigns" />
       <OverviewMetric label="To review" value={needsReview.length} note="Before your next launch" icon="shield" tone={needsReview.length ? "review" : ""} onClick={() => selectFilter("qa", true)} />
       <OverviewMetric label="Watches enabled" value={monitored.length} note={data.billing.monitoringActive ? `${data.billing.monitoringIntervalMinutes}-minute schedule` : "Coverage paused ? review your plan"} icon="watch" tone="watch" href="#/site-watch" />
       <OverviewMetric label="Open incidents" value={openIncidents.length} note={openIncidents.length ? "Landing-page issues to review" : "No open issues"} icon="warning" tone={openIncidents.length ? "incident" : ""} onClick={() => selectFilter("incident", true)} />
     </section>
 
-    <div className="overview-workspace">
+    <div className="overview-content">
       <section className="overview-panel overview-attention" ref={attention} tabIndex="-1" id="overview-attention" aria-labelledby="overview-attention-title">
         <div className="overview-panel-heading"><div><h2 id="overview-attention-title">Needs attention<span className="overview-count">{allActions.length}</span></h2><p>Open incidents first. Campaign checks next.</p></div></div>
         <div className="overview-filters" role="group" aria-label="Filter actions">
@@ -754,7 +773,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
           {actions.length ? <ul className="overview-action-list">{actions.slice(0, visibleCount).map((action) => action.type === "incident"
             ? <OverviewIncidentRow key={action.id} incident={action.incident} campaignName={campaignById.get(action.incident.campaignId)?.campaign.name} />
             : <OverviewQaRow key={action.id} item={action.item} busy={busy} runQa={runQa} />
-          )}</ul> : <div className="overview-empty"><span><Icon name={campaigns.length ? "check" : "campaigns"} size={24} /></span><h3>{!campaigns.length && !allActions.length ? "Your workspace starts here" : filter === "incident" ? "No open incidents" : filter === "qa" ? "No campaigns need review" : "You're all caught up"}</h3><p>{!campaigns.length && !allActions.length ? connected ? "Sync your Meta campaigns to run your first check." : "Connect Meta Ads to bring your campaigns into view." : filter === "incident" ? "Any new landing-page issues will appear here." : "Your next action will appear here when it's needed."}</p></div>}
+          )}</ul> : <div className="overview-empty"><span><Icon name={campaigns.length ? "check" : "campaigns"} size={24} /></span><h3>{!campaigns.length && !allActions.length ? "Start with your first campaign" : filter === "incident" ? "No open incidents" : filter === "qa" ? "No campaigns need review" : "You're all caught up"}</h3><p>{!campaigns.length && !allActions.length ? connected ? "Sync your Meta campaigns to run your first check." : "Connect Meta Ads to bring your campaigns into view." : filter === "incident" ? "Any new landing-page issues will appear here." : "Your next action will appear here when it's needed."}</p></div>}
         </div>
         {actions.length > 0 && <div className="overview-panel-footer"><span aria-live="polite">Showing {Math.min(visibleCount, actions.length)} of {actions.length}</span>{actions.length > visibleCount ? <button type="button" className="text-link overview-show-more" onClick={() => setVisibleCount((count) => count + 4)}>Show more <Icon name="chevron" size={14} /></button> : <a className="text-link" href={filter === "incident" ? incidentReportHref({ status: "OPEN" }) : "#/campaigns"}>{filter === "incident" ? "Incident report" : "All campaigns"}<Icon name="arrow" size={14} /></a>}</div>}
       </section>
@@ -838,12 +857,13 @@ function Campaigns({ data, busy, runQa, monitorCampaign, syncMeta, selectMetaAcc
 
   };
   return <>
-    <PageHeading eyebrow="CAMPAIGN LIBRARY" title="Your campaigns" action={<div className="campaign-heading-actions">{selectedAccounts.length > 0 && <label className="account-filter-label"><span className="sr-only">Ad account</span><select value={accountFilter} onChange={changeAccount} disabled={busy === "sync" || busy === "meta-accounts"}>
+    <PageHeading eyebrow="CAMPAIGN LIBRARY" title="Your campaigns" action={selectedAccounts.length > 0 && <div className="campaign-heading-actions"><label className="account-filter-label"><span className="sr-only">Ad account</span><select value={accountFilter} onChange={changeAccount} disabled={busy === "sync" || busy === "meta-accounts"}>
       <option value="">Select an ad account</option>
       {accounts.length > 1 && <option value="__all__">All selected accounts</option>}
       {selectedAccounts.map((account) => <option key={account.id} value={account.externalId}>{account.name} ({account.externalId.replace(/^act_/, "")})</option>)}
-    </select></label>}<Button kind="primary" icon="refresh" onClick={syncMeta} disabled={!meta.connection || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : "Sync campaigns"}</Button></div>}>Published campaigns and their destinations, synced from Meta.</PageHeading>
-    {accounts.length > 0 && <details className="panel billing-account-picker" open={selectedAccounts.length === 0 ? true : undefined}><summary>Choose accounts to sync <span>{selectedAccounts.length} / {data.billing.adAccounts.limit} selected</span></summary><p>Your plan covers {data.billing.adAccounts.limit} Meta accounts. Allowances are shared across your workspace.</p><div>{accounts.map((a) => <label key={a.id}><input type="checkbox" checked={a.selected} disabled={busy === "meta-accounts" || busy === "sync" || (!a.selected && selectedAccounts.length >= data.billing.adAccounts.limit)} onChange={() => selectMetaAccounts(a.selected ? selectedAccounts.filter((selected) => selected.id !== a.id).map((selected) => selected.externalId) : [...selectedAccounts.map((selected) => selected.externalId), a.externalId])} /><span>{a.name}<small>{a.externalId}</small></span></label>)}</div><a className="text-link" href="#/billing">Review account allowance <Icon name="arrow" size={14} /></a></details>}
+    </select></label></div>}>Published campaigns and their destinations, synced from Meta.</PageHeading>
+    <CampaignSyncReminder connection={meta.connection} busy={busy} syncMeta={syncMeta} />
+    {accounts.length > 0 && <details className="panel billing-account-picker" open={selectedAccounts.length === 0 ? true : undefined}><summary>Choose accounts to sync <span>{selectedAccounts.length} / {data.billing.adAccounts.limit} selected</span></summary><p>Your plan covers {data.billing.adAccounts.limit} Meta accounts. Your allowance covers all selected Meta ad accounts.</p><div>{accounts.map((a) => <label key={a.id}><input type="checkbox" checked={a.selected} disabled={busy === "meta-accounts" || busy === "sync" || (!a.selected && selectedAccounts.length >= data.billing.adAccounts.limit)} onChange={() => selectMetaAccounts(a.selected ? selectedAccounts.filter((selected) => selected.id !== a.id).map((selected) => selected.externalId) : [...selectedAccounts.map((selected) => selected.externalId), a.externalId])} /><span>{a.name}<small>{a.externalId}</small></span></label>)}</div><a className="text-link" href="#/billing">Review account allowance <Icon name="arrow" size={14} /></a></details>}
     <div className="metrics-grid">
       <Metric label="Awaiting review" value={needsAttention} note="Ready for a fresh campaign check" tone="coral" />
       <Metric label="Not running" value={nonLive.length} note="Paused, scheduled, or otherwise inactive" />
@@ -870,7 +890,7 @@ function CampaignTable({ items, busy, runQa, monitorCampaign }) {
         <td>{formatDate(campaign.startAt, { dateStyle: "medium", timeStyle: undefined })}</td>
         <td><Status value={item.verdict || "UNKNOWN"} label={status} /></td>
         {monitorCampaign && <td><Button icon="watch" className={`monitor-button ${item.monitoringEnabled ? "is-on" : ""}`} disabled={busy === "monitor:" + campaign.id || (!item.monitoringEnabled && !item.monitoringAvailable)} onClick={() => monitorCampaign(campaign.id, !item.monitoringEnabled)} title={!item.monitoringEnabled && !item.monitoringAvailable ? "No ad destination is currently available. Sync this campaign from Meta first." : `${item.monitoringDestinationCount || 0} landing page destinations`}>{busy === "monitor:" + campaign.id ? "Updating…" : item.monitoringEnabled ? "Pause watch" : item.monitoringAvailable ? "Start watch" : "No destination"}</Button></td>}
-        <td className="action-cell">{item.lastQa && !["STALE", "Not checked"].includes(status) ? <Button className="row-action" onClick={() => navigate(`report/${campaign.id}`)}>View report<Icon name="arrow" size={14} /></Button> : <Button className="row-action run-check" disabled={busy === `qa:${campaign.id}`} onClick={() => runQa(campaign.id)}>{busy === `qa:${campaign.id}` ? "Checking…" : "Run check"}<Icon name="arrow" size={14} /></Button>}</td>
+        <td className="action-cell">{isQaActive(item.lastQa) || (item.lastQa && !["STALE", "Not checked"].includes(status)) ? <Button className="row-action" onClick={() => navigate(`report/${campaign.id}`)}>{isQaActive(item.lastQa) ? "View progress" : "View report"}<Icon name="arrow" size={14} /></Button> : <Button className="row-action run-check" disabled={Boolean(busy)} onClick={() => runQa(campaign.id)}>{busy === `qa:${campaign.id}` ? "Starting…" : "Run check"}<Icon name="arrow" size={14} /></Button>}</td>
       </tr>;
     })}</tbody>
   </table></div>;
@@ -983,11 +1003,10 @@ function AdSetCard({ adSet, ads }) {
   </article>;
 }
 
-function QaReport({ campaignId, refreshKey, busy, runQa }) {
+function QaReport({ campaignId, refreshKey, trackedRun, trackRun, busy, runQa, meta, syncMeta }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [reportVersion, setReportVersion] = useState(0);
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -1002,18 +1021,16 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
         if (active) setDetail({ summary, ads, adSets, run: null, results: [], evidence: {} });
         return;
       }
-      if (["QUEUED", "RUNNING"].includes(run.status)) {
+      if (isQaActive(run)) {
         if (active) setDetail({ summary, ads, adSets, run, results: [], evidence: {} });
-        waitFor("/api/qa-runs", run.id)
-          .then(() => { if (active) setReportVersion((version) => version + 1); })
-          .catch((e) => { if (active) setError(e.message); });
+        if (active) trackRun(run, summary.campaign.name);
         return;
       }
       const report = await request(`/api/qa-runs/${run.id}/report`);
       if (active) setDetail({ summary, ads, adSets, run, results: report.results, evidence: report.evidence });
     }).catch((e) => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [campaignId, refreshKey, reportVersion]);
+  }, [campaignId, refreshKey, trackRun]);
 
   useEffect(() => {
     if (!loading && !error && detail?.run?.status === "COMPLETED" && detail.results?.length)
@@ -1024,6 +1041,10 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
   if (error) return <div className="alert error" role="alert">{error} <Button onClick={() => window.location.reload()}>Retry</Button></div>;
   if (!detail) return null;
   const campaign = detail.summary.campaign;
+  const run = latestQaRun(detail.run, trackedRun);
+  const checking = isQaActive(run);
+  const reportFailed = ["FAILED", "UNAVAILABLE"].includes(run?.status);
+  const reportReady = run?.status === "COMPLETED" && detail.run?.id === run.id && detail.run?.status === "COMPLETED";
   const adSets = detail.adSets || [];
   const ads = detail.ads || [];
   const assignedAdIds = new Set(adSets.flatMap((adSet) => ads.filter((ad) => ad.adSetId === adSet.id).map((ad) => ad.id)));
@@ -1040,16 +1061,17 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
     <PageHeading eyebrow="CAMPAIGN REVIEW" title="Campaign QA report" action={<Button onClick={() => navigate("campaigns")}>← All campaigns</Button>}>
       Review what needs attention, what passed, and the campaign details behind each check.
     </PageHeading>
-    <div className={`report-summary ${statusTone(detail.summary.verdict || "UNKNOWN")}`}>
-      <div className="report-verdict"><div className="eyebrow">CAMPAIGN READINESS</div><Status value={detail.summary.verdict || "UNKNOWN"} label={friendlyStatus(detail.summary.verdict)} /><small>Latest QA run of published Meta data</small></div>
-      <div className="report-count"><strong>{actionCount}</strong><span>Need action</span></div>
-      <div className="report-count"><strong>{reviewCount}</strong><span>Need your review</span></div>
-      <div className="report-count"><strong>{passedCount}</strong><span>Checks passed</span></div>
-      <div className="report-last-run"><span>Last checked</span><strong>{formatDate(detail.run?.completedAt || detail.run?.createdAt)}</strong></div>
-      <Button kind="primary" disabled={busy === `qa:${campaignId}`} onClick={() => runQa(campaignId)}>{busy === `qa:${campaignId}` ? "Running QA…" : detail.run ? "Check again" : "Run campaign check"}</Button>
+    <CampaignSyncReminder connection={meta?.connection} busy={busy} syncMeta={syncMeta} />
+    {checking && <QaProgress run={run} adCount={ads.length} />}
+    <div className={`report-summary ${statusTone(checking ? "RUNNING" : reportReady ? detail.summary.verdict : run?.status || "UNKNOWN")}`}>
+      <div className="report-verdict"><div className="eyebrow">CAMPAIGN READINESS</div><Status value={checking ? "RUNNING" : reportReady ? detail.summary.verdict || "UNKNOWN" : reportFailed ? "FAILED" : "UNKNOWN"} label={checking ? "Check running" : reportFailed ? "Check could not finish" : reportReady ? friendlyStatus(detail.summary.verdict) : run?.status === "COMPLETED" ? "Loading report" : "Not checked"} /><small>Latest QA run of published Meta data</small></div>
+      <div className="report-count"><strong>{reportReady ? actionCount : "—"}</strong><span>Need action</span></div>
+      <div className="report-count"><strong>{reportReady ? reviewCount : "—"}</strong><span>Need your review</span></div>
+      <div className="report-count"><strong>{reportReady ? passedCount : "—"}</strong><span>Checks passed</span></div>
+      <div className="report-last-run"><span>{checking ? "Started" : "Last checked"}</span><strong>{formatDate(run?.completedAt || run?.createdAt)}</strong></div>
+      <Button kind="primary" disabled={checking || Boolean(busy)} onClick={() => runQa(campaignId)}>{checking ? "Check running…" : busy === `qa:${campaignId}` ? "Starting…" : run ? "Check again" : "Run campaign check"}</Button>
     </div>
-    {detail.run && ["QUEUED", "RUNNING"].includes(detail.run.status) && <div className="alert" role="status">A QA run is {detail.run.status.toLowerCase()}. Refresh this report in a moment to see its result.</div>}
-    {detail.run?.status === "FAILED" && <div className="alert error" role="alert">{detail.run.errorMessage || "The latest QA run failed."}</div>}
+    {reportFailed && <div className="alert error" role="alert">{run.errorMessage || "The latest QA run failed. You can try the check again."}</div>}
     <div className="report-columns">
       <section className="panel creative-panel"><div className="campaign-info-heading"><div><div className="eyebrow">CAMPAIGN OVERVIEW</div><h2>{campaign.name}</h2><p>{campaignObjective(campaign.objective)}</p></div><Status value={campaignPhase(campaign) === "Live" ? "ACTIVE" : campaign.status || "UNKNOWN"} label={campaignPhase(campaign)} /></div>
         <div className="campaign-count-strip"><span>{adSets.length} ad set{adSets.length === 1 ? "" : "s"}</span><span>{ads.length} ad{ads.length === 1 ? "" : "s"}</span></div>
@@ -1061,8 +1083,8 @@ function QaReport({ campaignId, refreshKey, busy, runQa }) {
         {unassignedAds.length > 0 && <section className="unassigned-ads"><h3>Ads without ad set details</h3>{unassignedAds.map((ad) => <AdCreativeCard key={ad.id} ad={ad} />)}</section>}
         {ads.length === 0 && adSets.length > 0 && <p className="muted-copy">No ads were returned for this campaign.</p>}
       </section>
-      <section className="panel finding-panel"><div className="panel-heading"><div><h2>Launch checklist</h2><p>{actionCount ? `${actionCount} item${actionCount === 1 ? "" : "s"} to address` : "No blocking issues found"}{reviewCount ? ` · ${reviewCount} need your judgment` : ""}</p></div><small className="report-check-count">{coreResults.length} checks</small></div>
-        {!detail.run ? <Empty title="Ready for your first check">Run a campaign check to review your ads and landing-page destinations.</Empty> : ["QUEUED", "RUNNING"].includes(detail.run.status) ? <Empty title="Your check is running">You can review the campaign details while we inspect its ads and destinations.</Empty> : coreResults.length === 0 ? <Empty title="No checks to display">The latest run has no results for the selected launch checks.</Empty> : <div className="finding-list">{coreResults.map((result) => <Finding key={result.id} result={result} evidence={detail.evidence[result.id] || []} />)}</div>}
+      <section className="panel finding-panel"><div className="panel-heading"><div><h2>Launch checklist</h2><p>{checking ? "Results will appear when your check finishes" : !reportReady ? "Waiting for a completed check" : actionCount ? `${actionCount} item${actionCount === 1 ? "" : "s"} to address` : "No blocking issues found"}{reportReady && reviewCount ? ` · ${reviewCount} need your judgment` : ""}</p></div><small className="report-check-count">{checking ? "In progress" : reportReady ? `${coreResults.length} checks` : ""}</small></div>
+        {!run ? <Empty title="Ready for your first check">Run a campaign check to review your ads and landing-page destinations.</Empty> : checking ? <Empty title="Your check is running">Review the campaign details or keep working elsewhere. Your results will appear automatically.</Empty> : !reportReady ? <Empty title={reportFailed ? "Your check could not finish" : "Loading your report"}>{reportFailed ? "Try the check again to get a complete report." : "Your results will appear here shortly."}</Empty> : coreResults.length === 0 ? <Empty title="No checks to display">The latest run has no results for the selected launch checks.</Empty> : <div className="finding-list">{coreResults.map((result) => <Finding key={result.id} result={result} evidence={detail.evidence[result.id] || []} />)}</div>}
       </section>
     </div>
   </>;
@@ -1175,7 +1197,7 @@ function reviewExplanation(result) {
   const message = result.humanMessage || "No explanation was provided for this check.";
   if (message.startsWith("AI_UNSUPPORTED_EVIDENCE:")) return "The AI described a possible result, but its quoted text did not match the captured campaign or page. Review the source details before launch.";
   if (message.startsWith("TARGET_LOCATION_EVIDENCE_UNAVAILABLE:")) return "The campaign's target locations were not clear in the imported campaign data, so this check could not be confirmed.";
-  if (message === "AI_NOT_CONFIGURED") return "Campaign and landing-page data were captured, but AI checks are not configured for this workspace. Configure the AI endpoint, key, and model to enable this review.";
+  if (message === "AI_NOT_CONFIGURED") return "Campaign and landing-page data were captured, but AI checks are not configured for your account. Configure the AI endpoint, key, and model to enable this review.";
   if (message === "INSUFFICIENT_SOURCES") return "The AI check did not receive enough ad-copy or landing-page text to compare.";
   const httpError = message.match(/^AI_UNAVAILABLE_HTTP_(\d{3})$/);
   if (httpError) return `Campaign and landing-page data were captured, but the AI endpoint returned HTTP ${httpError[1]}. Check the endpoint, API key, model, and provider logs.`;
@@ -1341,6 +1363,7 @@ function IncidentSummary({ group, campaignId, actOnIncident, busy }) {
     <p>{group.totalCount} incident{group.totalCount === 1 ? "" : "s"} recorded{group.pageCount ? ` · ${group.pageCount} ${group.openCount ? "affected" : "previously affected"} page${group.pageCount === 1 ? "" : "s"}` : ""}</p>
     <IncidentValues incident={incident} />
     {url && <a className="incident-page-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
+    {incident.status === "RESOLVED" && incident.resolutionNote && <p className="incident-resolution-note">{incident.resolutionNote}</p>}
     {group.intentionalCount > 0 && !group.openCount && <p className="incident-intentional-note">Intentional for this campaign until reverted. Future incidents of this type will not open alerts.</p>}
     <div className="incident-foot"><span>{group.openCount ? "Latest open observation" : "Last seen"}: {formatDate(incident.lastSeenAt)}</span><a className="text-link" href={incidentReportHref({ campaignId, type: group.type })}>Review incidents <Icon name="arrow" size={14} /></a><IncidentActions incident={incident} actOnIncident={actOnIncident} busy={busy} /></div>
   </article>;
@@ -1438,7 +1461,7 @@ function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, 
   };
   const accounts = meta.accounts || [];
   return <>
-    <PageHeading eyebrow="MAKE IT YOURS" title="Workspace settings" >Your connections, monitoring, and notifications. Just the way you need them.</PageHeading>
+    <PageHeading eyebrow="MAKE IT YOURS" title="Account settings" >Your connections, monitoring, and notifications. Just the way you need them.</PageHeading>
     <section className="panel settings-account"><div className="settings-title"><div className="section-title"><span className="integration-icon"><Icon name="meta" size={28} /></span><div><h2>Meta Ads</h2><p>Your campaign source, connected securely.</p></div></div><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Connected" : "Not connected"} /></div>
       <div className="settings-connection"><div><strong>{accounts.length} ad account{accounts.length === 1 ? "" : "s"} available</strong><p>{accounts.filter((account) => account.selected).length} selected for campaign sync</p></div>{meta.connection?.lastSyncAt && <small><Icon name="clock" size={14} /> Last synced {formatDate(meta.connection.lastSyncAt)}</small>}</div>
       {accounts.length > 0 && <details className="connected-accounts"><summary>View connected ad accounts <Icon name="chevron" size={15} /></summary><div className="account-details">{accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected && <span className="account-selected"><Icon name="check" size={12} /> Selected</span>}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>)}</div></details>}
@@ -1519,7 +1542,7 @@ function WebsiteRouter() {
     return () => window.removeEventListener("hashchange", updateRoute);
   }, []);
   useEffect(() => {
-    const titles = { home: "Click Cohere — Keep the promise behind every click", login: "Log in — Click Cohere", signup: "Create your workspace — Click Cohere", overview: "Campaign overview — Click Cohere", campaigns: "Your campaigns — Click Cohere", "site-watch": "Campaign watch — Click Cohere", incidents: "Incident report — Click Cohere", settings: "Workspace settings — Click Cohere", report: "Campaign QA report — Click Cohere" };
+    const titles = { home: "Click Cohere — Keep the promise behind every click", login: "Log in — Click Cohere", signup: "Create your account — Click Cohere", overview: "Campaign overview — Click Cohere", campaigns: "Your campaigns — Click Cohere", "site-watch": "Campaign watch — Click Cohere", incidents: "Incident report — Click Cohere", settings: "Account settings — Click Cohere", report: "Campaign QA report — Click Cohere" };
     titles.billing = "Plan & usage - Click Cohere";
     titles["forgot-password"] = "Recover your account — Click Cohere";
     titles["reset-password"] = "Reset password — Click Cohere";
@@ -1533,9 +1556,3 @@ function WebsiteRouter() {
 }
 
 createRoot(document.getElementById("root")).render(<React.StrictMode><WebsiteRouter /><AnalyticsConsent /></React.StrictMode>);
-
-function AnalysisConfirmation({ estimate, onCancel, onConfirm }) {
-  const dialog = useRef(null);
-  useEffect(() => { dialog.current?.showModal(); return () => dialog.current?.close(); }, []);
-  return <dialog ref={dialog} className="incident-decision-dialog" onCancel={(event) => { event.preventDefault(); onCancel(); }} aria-labelledby="analysis-confirm-title"><div className="incident-decision-content"><div className="eyebrow">BEFORE YOU RUN</div><h2 id="analysis-confirm-title">{estimate.analysisCount} ad {estimate.analysisCount === 1 ? "analysis" : "analyses"}</h2><p>Each ad is checked against its landing page, with all supported checks included. This campaign will reserve {estimate.analysisCount} analyses while the report runs.</p><p><strong>{estimate.remaining} analyses are available.</strong> Failed work and automatic retries do not use additional analyses.</p>{!estimate.canRun && <p>Your allowance does not cover this run. Choose a plan or add analyses before continuing.</p>}<div className="incident-decision-actions"><button className="button secondary" autoFocus onClick={onCancel}>Cancel</button>{estimate.canRun ? <button className="button primary" onClick={onConfirm}>Run {estimate.analysisCount} analyses</button> : <a className="button primary" href="#/billing" onClick={onCancel}>Review plan & usage</a>}</div></div></dialog>;
-}

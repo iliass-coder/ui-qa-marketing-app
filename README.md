@@ -38,6 +38,8 @@ Incident summaries and report cards offer **Recheck** and **Mark intentional**. 
 
 **Revert intentional** restores normal handling and requests a fresh inspection. Previous intentional records become **Reverted**, and a continuing failure creates a fresh open incident. Reverted records are available through the status filter. The former Request resolution action has been removed.
 
+Campaign QA opens its report as soon as the backend accepts a run. Checks continue while you navigate or refresh, with elapsed time and persistent **Report ready / View report** notifications. Status tracking is scoped to the signed-in member and workspace; transient connection failures retry automatically. Running checks display pending readiness and counts until a complete report is available. Completion updates an open report without redirecting someone working elsewhere.
+
 ## Build and test
 
 ```powershell
@@ -53,17 +55,19 @@ After successful Meta authorization, the backend returns to `APP_ORIGIN/#/settin
 
 The campaign library imports published Meta campaigns, including paused campaigns. The **Not running** filter groups campaigns that are not currently live; each row shows its Meta status or scheduled phase. To review a new campaign before activation, publish its campaign, ad sets, and ads with the campaign switched off, then sync and run QA. Checks cover published data; unpublished drafts and unpublished edits are unavailable.
 
+Overview, Campaigns, and campaign QA reports show a persistent reminder to sync after publishing changes in Meta, with the last sync time and a **Sync campaigns** action. Run check is disabled while a sync is running; after syncing, start a new check to use the latest data. Clicking **Run check** starts QA immediately and opens its progress report. Existing reports keep the results from their original run. Scheduled campaign watches continue to refresh their destinations automatically.
+
 Google sign-in and sign-up are optional. Configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the backend, and register `${APP_ORIGIN}/login/oauth2/code/google` as the Google OAuth web client's authorized redirect URI. Set `GOOGLE_LOGIN_SUCCESS_URL` to the frontend URL after sign-in. For local development, keep the hostname consistent with `APP_ORIGIN` so the session cookie is shared (for example, `localhost` for both the backend and Vite).
 
-The access page supports account creation with email/password and Google. Email/password registration creates an isolated workspace and requires `EMAIL_VERIFICATION_ENABLED=true` plus working SMTP settings. Google sign-up creates a workspace immediately using the verified Google address; it does not require SMTP. New passwords must be at least 8 characters. `ADMIN_EMAIL` and `ADMIN_PASSWORD` only seed the initial owner on an empty database; they do not control later sign-ups.
+The access page supports account creation with email/password and Google. Email/password registration creates an isolated account and requires `EMAIL_VERIFICATION_ENABLED=true` plus working SMTP settings. Google sign-up creates an account immediately using the verified Google address; it does not require SMTP. New passwords must be at least 8 characters. `ADMIN_EMAIL` and `ADMIN_PASSWORD` only seed the initial owner on an empty database; they do not control later sign-ups.
 
 For production SSO, the same public app host must route `/api/**`, `/oauth2/**`, and `/login/oauth2/**` to the backend. The Google OAuth web client redirect URI is `${APP_ORIGIN}/login/oauth2/code/google`; Meta continues to use `${APP_ORIGIN}/api/integrations/meta/callback`.
 
 ## Backend contract used by this UI
 
-Sign-in lasts 48 hours without activity by default, configured on the backend with `SESSION_IDLE_TIMEOUT_HOURS`. Visible interaction and returning to the workspace renew the server session and HttpOnly cookie through `POST /api/auth/activity`, at most once a minute per tab. Background status polling does not renew it. Expired sessions return to sign-in with a notice.
+Sign-in lasts 48 hours without activity by default, configured on the backend with `SESSION_IDLE_TIMEOUT_HOURS`. Visible interaction and returning to the app renew the server session and HttpOnly cookie through `POST /api/auth/activity`, at most once a minute per tab. Background status polling does not renew it. Expired sessions return to sign-in with a notice.
 
-Workspace settings include password changes and deletion confirmation by email. Password reset/change signs out all devices. Deletion removes the shared workspace only when its last member leaves; campaigns in Meta remain in their current state. These email flows require working backend SMTP and `ACCOUNT_RECOVERY_ENABLED=true` (defaults to `EMAIL_VERIFICATION_ENABLED` when omitted).
+Account settings include password changes and deletion confirmation by email. Password reset/change signs out all devices. Deletion cancels any associated subscription and removes account data; data still used by other authorized users is retained. Campaigns in Meta remain in their current state. These email flows require working backend SMTP and `ACCOUNT_RECOVERY_ENABLED=true` (defaults to `EMAIL_VERIFICATION_ENABLED` when omitted).
 
 Meta settings show token and data-access expiry. Reconnect warnings appear seven days before the earlier expiry; expired or revoked access blocks automatic campaign actions until reconnection. Existing connections without verified metadata display an access warning. Connection status refreshes every minute and when the window regains focus. The backend exchanges fresh OAuth tokens for long-lived tokens and verifies them on a schedule; renewing access uses Meta reconnection.
 
@@ -71,12 +75,12 @@ The UI uses the existing backend routes for login/session, Meta connection and s
 
 ## Plans and usage
 
-`/#/billing` shows trial status, analysis reservations and balances, monitored-page limits, selected-account limits, and usage by Meta account. Stripe hosts checkout, subscription changes, payment methods, invoices, and cancellation. Public pricing and FAQs explain the 10-analysis preview, card-free 14-day monitoring trial, Starter ($39), Growth ($99), and Agency by arrangement. Plan intent survives signup. Campaign QA confirms the analysis count before a run; the account picker enforces the displayed account allowance.
+`/#/billing` shows trial status, analysis reservations and balances, monitored-page limits, selected-account limits, and usage by Meta account. Stripe hosts checkout, subscription changes, payment methods, invoices, and cancellation. Public pricing and FAQs explain the 10-analysis preview, card-free 14-day monitoring trial, Starter ($39), Growth ($99), and Agency by arrangement. Plan intent survives signup. Campaign QA starts directly from **Run check**; the server enforces the analysis allowance, and the account picker enforces the displayed account allowance.
 
 Set up the backend using [the billing guide](../qa-marketing-integration/docs/billing.md). Paid checkout stays unavailable until its two Stripe secrets are configured.
 
 ## Product analytics
 
-Optional website visit tracking starts after **Allow analytics** and can be changed through **Privacy choices**. Requests use the same-origin backend; no private PostHog key or session recording code is included in the frontend. Completed QA report views are recorded as workspace outcomes. The backend also records signup, monitoring, trial, and confirmed subscription milestones.
+Optional website visit tracking starts after **Allow analytics** and can be changed through **Privacy choices**. Requests use the same-origin backend; no private PostHog key or session recording code is included in the frontend. Completed QA report views are recorded as account outcomes. The backend also records signup, monitoring, trial, and confirmed subscription milestones.
 
-See the [analytics setup and testing guide](../qa-marketing-integration/docs/analytics.md) for the three dashboard definitions, test mode, and verification commands. The [private dashboard](https://us.posthog.com/project/687804/dashboard/2258445) shows landing-page views, the landing-page-to-signup rate, and plan buyers. All three cover the last 30 days and show current-day activity without a cohort waiting period. Plan buyers count each workspace once after its first confirmed live Stripe subscription payment. Development activity, Stripe test payments, and explicitly labeled test events are excluded.
+See the [analytics setup and testing guide](../qa-marketing-integration/docs/analytics.md) for the three dashboard definitions, test mode, and verification commands. The [private dashboard](https://us.posthog.com/project/687804/dashboard/2258445) shows landing-page views, the landing-page-to-signup rate, and plan buyers. All three cover the last 30 days and show current-day activity without a cohort waiting period. Plan buyers count each account once after its first confirmed live Stripe subscription payment. Development activity, Stripe test payments, and explicitly labeled test events are excluded.

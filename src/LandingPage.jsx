@@ -5,13 +5,13 @@ import "./landing.css";
 import { PricingCards, AgencyNote } from "./Billing.jsx";
 
 const questions = [
+  ["Can I check a campaign before it goes live?", "Yes. Publish your campaign, ad sets, and ads in Meta Ads Manager with the campaign set to Paused, then sync in Click Cohere and run a check. Drafts and unpublished edits cannot be checked. Campaigns that are already live can be checked too."],
+  ["Do I need to sync after making changes in Meta?", "Yes. After publishing a new campaign or changing your ads, budget, targeting, or landing-page links in Meta Ads Manager, click Sync campaigns in Click Cohere. Wait for the sync to finish, then run a new check. Without syncing, a new check can still use older campaign data."],
+  ["How long does a campaign check take?", "Allow a few seconds for the check to complete. Larger campaigns or slower landing pages can take longer. You can keep working while it runs; we'll let you know in the app when your report is ready."],
   ["Does Click Cohere change my ads?", "Campaign checks do not publish ads or edit creative. Optional automatic pausing is in beta and requires you to accept a warning before enabling it. It can pause monitored campaigns after two confirmed page failures and a fresh recheck, with campaign management permission. Blocked or uncertain checks do not qualify. Paused campaigns must be restarted manually in Meta Ads."],
   ["How often are destinations checked?", "Paid campaign watches are scheduled every 30 minutes; the free monitoring trial runs every hour. Each run refreshes the campaign’s current destinations from Meta before inspecting them."],
   ["Do I need a credit card for the trial?", "No. Your free preview includes 10 ad analyses in total and 14 days of monitoring for up to 3 landing pages. The monitoring trial starts with your first watch. When it ends, monitoring stops and your saved reports remain available. There is no automatic charge."],
-  ["What counts as an analysis or a monitored page?", "One analysis checks one ad against its landing page, including all supported checks. A campaign with 20 ads uses 20 analyses. One distinct landing-page URL uses one monitoring slot across your workspace, even when several campaigns share it. Meaningful query variants count separately."],
-  ["What happens when I reach my limits?", "Existing watches continue when you use your analysis allowance. Paid subscribers can add 100 analyses for $15, valid for 90 days. New watches must fit your page allowance. If Meta adds destinations beyond your coverage, your existing allocated pages stay covered and extra pages wait for space or an upgrade."],
   ["What if a detail cannot be verified?", "It is marked “Could not confirm.” Some content comparisons use an optional AI service. Findings include source details so you can make the final call."],
-  ["Does it test the whole checkout?", "Click Cohere inspects the HTML served by the destination page. It does not complete purchases or validate the checkout flow. Dynamic or ambiguous details may need your review."],
 ];
 
 function ProductArtwork({ muted = false }) {
@@ -72,7 +72,7 @@ export function LandingPage() {
         <a href="/" className="lp-brand-link" aria-label="Click Cohere home"><Brand /></a>
         <nav id="landing-navigation" className={`lp-navigation ${menuOpen ? "is-open" : ""}`} aria-label="Website navigation">
           <a href="#product" onClick={closeMenu}>The product</a><a href="#how-it-works" onClick={closeMenu}>How it works</a><a href="#pricing" onClick={closeMenu}>Pricing</a><a href="#questions" onClick={closeMenu}>Questions</a>
-          <div className="lp-mobile-auth"><a href="#/login">Log in <Icon name="arrow" size={16} /></a><a href="#/signup">Create your workspace <Icon name="arrow" size={16} /></a></div>
+          <div className="lp-mobile-auth"><a href="#/login">Log in <Icon name="arrow" size={16} /></a><a href="#/signup">Create your account <Icon name="arrow" size={16} /></a></div>
         </nav>
         <div className="lp-nav-actions"><a href="#/login" className="lp-login-link">Log in</a><a href="#/signup" className="lp-button lp-button-small">Get started <Icon name="arrow" size={15} /></a><button ref={menuButton} className="lp-menu-button" aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen} aria-controls="landing-navigation" onClick={() => setMenuOpen(!menuOpen)}><Icon name={menuOpen ? "close" : "menu"} size={23} /></button></div>
       </div>
@@ -101,7 +101,7 @@ export function LandingPage() {
       </div></section>
 
       <section className="lp-workflow lp-container lp-section" id="how-it-works" aria-labelledby="workflow-title"><div className="lp-workflow-heading"><div><div className="lp-section-index">03 <span>YOUR FIRST CLEARER PICTURE</span></div><h2 id="workflow-title">A clearer view <br />in three moves.</h2></div><a href="#/signup" className="lp-text-link">Make your first move <Icon name="arrow" size={18} /></a></div><div className="lp-steps">{[
-        ["01", "meta", "Connect Meta.", "Choose the ad accounts you want in your workspace."],
+        ["01", "meta", "Connect Meta.", "Choose the Meta ad accounts you want to connect."],
         ["02", "shield", "Check a campaign.", "Review its destinations and the findings that need your judgment."],
         ["03", "watch", "Keep watch.", "Turn on monitoring for the campaigns you want to follow after launch."],
       ].map(([number, icon, title, copy]) => <article key={number}><div className="lp-step-top"><span>{number}</span><Icon name={icon} size={25} /></div><h3>{title}</h3><p>{copy}</p></article>)}</div></section>
@@ -113,6 +113,6 @@ export function LandingPage() {
       <section className="lp-final-cta lp-container" aria-labelledby="final-cta-title"><div className="lp-cta-mark" aria-hidden="true"><BrandIcon size={34} /></div><div className="lp-eyebrow">A BETTER HANDOFF STARTS HERE</div><h2 id="final-cta-title">Give your next click <br /><span>a better landing.</span></h2><p>Bring your campaigns and landing pages into the same view.</p><a href="#/signup" className="lp-button">Start your free preview <Icon name="arrow" size={17} /></a><p className="lp-final-login">Already have an account? <a href="#/login">Log in <Icon name="arrow" size={13} /></a></p></section>
     </main>
 
-    <footer className="lp-footer lp-container"><div className="lp-footer-top"><a href="/" className="lp-brand-link" aria-label="Click Cohere home"><Brand /></a><p>Built for the handoff <br />between ad and page.</p><nav aria-label="Footer navigation"><a href="#product">The product</a><a href="#how-it-works">How it works</a><a href="#pricing">Pricing</a><a href="#questions">Questions</a></nav><nav aria-label="Account and support navigation"><a href="#/login">Log in</a><a href="#/signup">Create a workspace <Icon name="arrow" size={13} /></a><a href="/support.html">Contact support</a></nav></div><nav className="lp-footer-policies" aria-label="Legal"><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/refunds.html">Refunds &amp; cancellation</a></nav><div className="lp-footer-bottom"><span>© {new Date().getFullYear()} Click Cohere</span><span>Every click, connected.</span><a href="#landing-content">Back to top ↑</a></div></footer>
+    <footer className="lp-footer lp-container"><div className="lp-footer-top"><a href="/" className="lp-brand-link" aria-label="Click Cohere home"><Brand /></a><p>Built for the handoff <br />between ad and page.</p><nav aria-label="Footer navigation"><a href="#product">The product</a><a href="#how-it-works">How it works</a><a href="#pricing">Pricing</a><a href="#questions">Questions</a></nav><nav aria-label="Account and support navigation"><a href="#/login">Log in</a><a href="#/signup">Create an account <Icon name="arrow" size={13} /></a><a href="/support.html">Contact support</a></nav></div><nav className="lp-footer-policies" aria-label="Legal"><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/refunds.html">Refunds &amp; cancellation</a></nav><div className="lp-footer-bottom"><span>© {new Date().getFullYear()} Click Cohere</span><span>Every click, connected.</span><a href="#landing-content">Back to top ↑</a></div></footer>
   </div>;
 }

@@ -3,6 +3,10 @@ import { Brand } from "./Brand.jsx";
 import { Icon } from "./icons.jsx";
 import { formatDate } from "./domain.js";
 
+const deletionDetails = (account) => account?.deletionRemovesData === false
+  ? "Your account and all its sessions will be deleted. Data used by other authorized users will be retained."
+  : "Your account, imported campaigns, monitoring history, and stored Meta connection will be permanently deleted, and any paid subscription will be canceled.";
+
 export function MetaConnectionNotice({ meta }) {
   if (!meta?.connection) return null;
   const { tokenHealth = {}, connection } = meta;
@@ -64,7 +68,7 @@ export function RecoveryPage({ mode, token = "", request, enabled, account, onSi
       <p>{deleting ? `Confirm deletion of ${account?.user?.email || "your account"}. This action is permanent.` : resetting ? "Use at least 8 characters. All devices will be signed out after the reset." : "Enter your account email and we will send you a password reset link."}</p>
       {error && <div className="alert error" role="alert">{error}</div>}
       {notice && <div className="alert success" role="status">{notice}</div>}
-      {deleting && <div className="alert" role="note">{account?.workspaceMemberCount === 1 ? "You are the last workspace member. Your workspace, imported campaigns, monitoring history, and stored Meta connection will be permanently deleted." : "Your account and all its sessions will be deleted. Other members will retain access to the shared workspace."} Your campaigns in Meta will remain in their current state, including any campaigns already paused.</div>}
+      {deleting && <div className="alert" role="note">{deletionDetails(account)} Your campaigns in Meta will remain in their current state, including any campaigns already paused.</div>}
       {(resetting || deleting) && !validToken ? <div className="alert error" role="alert">This confirmation link is missing or invalid. {resetting ? <a href="#/forgot-password">Request a new reset link.</a> : <a href="#/settings">Request a new deletion email from settings.</a>}</div> : <form className="form-stack" onSubmit={submit}>
         {deleting ? <label>Type DELETE to confirm<input name="confirmation" autoComplete="off" required pattern="DELETE" maxLength="6" /></label> : resetting ? <>
           <label>New password<input type="password" name="password" autoComplete="new-password" required minLength="8" maxLength="200" /></label>
@@ -72,7 +76,7 @@ export function RecoveryPage({ mode, token = "", request, enabled, account, onSi
         </> : <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" /></label>}
         <button className={`button ${deleting ? "danger" : "primary"}`} disabled={busy || (!deleting && !resetting && enabled !== true)} type="submit">{busy ? "Working…" : deleting ? "Permanently delete my account" : resetting ? "Reset password" : "Send reset link"}</button>
       </form>}
-      {!deleting && !resetting && enabled === false && <p className="account-help">Recovery email is currently unavailable. Contact your workspace administrator.</p>}
+      {!deleting && !resetting && enabled === false && <p className="account-help">Recovery email is currently unavailable. Contact support.</p>}
       <a className="text-link recovery-back" href={deleting ? "#/settings" : "#/login"}>{deleting ? "Cancel and return to settings" : "Back to sign in"}</a>
     </section>
   </main>;
@@ -131,9 +135,9 @@ export function AccountSettings({ account, request, onSignedOut }) {
       <button className="button secondary" disabled={Boolean(busy)} type="submit">{busy === "password" ? "Updating…" : "Change password"}</button>
       {emailEnabled && <button className="text-button account-reset-link" type="button" disabled={Boolean(busy)} onClick={() => sendEmail(false)}>Forgot your current password? Send a reset link</button>}
     </form> : <div className="account-password-form"><h3>Add a password</h3><p className="account-help">You use Google to sign in. An email link lets you add a password for email sign-in.</p><button className="button secondary" disabled={Boolean(busy) || !emailEnabled} onClick={() => sendEmail(false)}>Send password setup link</button></div>}
-    <div className="account-deletion"><h3>Delete account</h3><p>Delete your account and sign out all devices. If you are the last member, your workspace data and stored Meta connection will also be permanently deleted, and your paid subscription will be canceled. You will confirm using a link sent to your account email.</p><p>Your campaigns in Meta will remain in their current state.</p>
+    <div className="account-deletion"><h3>Delete account</h3><p>{deletionDetails(account)} All your devices will be signed out. You will confirm using a link sent to your account email.</p><p>Your campaigns in Meta will remain in their current state.</p>
       <button className="button danger" disabled={Boolean(busy) || !emailEnabled} onClick={() => sendEmail(true)}>{busy === "delete" ? "Sending…" : "Email deletion confirmation"}</button>
     </div>
-    {!emailEnabled && <p className="account-help">Recovery emails are currently unavailable. Contact your workspace administrator for account recovery or deletion.</p>}
+    {!emailEnabled && <p className="account-help">Recovery emails are currently unavailable. Contact support for account recovery or deletion.</p>}
   </section>;
 }

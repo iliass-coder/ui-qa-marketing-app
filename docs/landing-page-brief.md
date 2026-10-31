@@ -12,7 +12,7 @@ Headline: **Your ad makes a promise. Make sure the page keeps it.**
 
 Supporting copy: Catch the disconnect between your Meta ads and their landing pages. Check before launch. Keep watch after.
 
-Primary action: **Create your workspace** → `#/signup`
+Primary action: **Create your account** → `#/signup`
 
 Secondary action: **See it in action** → product example
 
@@ -56,27 +56,39 @@ Action: Explore campaign watch → after-launch example.
 
 **A clearer view in three moves.**
 
-1. **Connect Meta.** Choose the ad accounts you want in your workspace.
+1. **Connect Meta.** Choose the Meta ad accounts you want to connect.
 2. **Check a campaign.** Review its destinations and the findings that need your judgment.
 3. **Keep watch.** Turn on monitoring for the campaigns you want to follow after launch.
 
 ### Questions
 
+**Can I check a campaign before it goes live?**
+
+Yes. Publish your campaign, ad sets, and ads in Meta Ads Manager with the campaign set to Paused, then sync in Click Cohere and run a check. Drafts and unpublished edits cannot be checked. Campaigns that are already live can be checked too.
+
+**Do I need to sync after making changes in Meta?**
+
+Yes. After publishing a new campaign or changing your ads, budget, targeting, or landing-page links in Meta Ads Manager, click Sync campaigns in Click Cohere. Wait for the sync to finish, then run a new check. Without syncing, a new check can still use older campaign data.
+
+**How long does a campaign check take?**
+
+Allow a few seconds for the check to complete. Larger campaigns or slower landing pages can take longer. You can keep working while it runs; we'll let you know in the app when your report is ready.
+
 **Does Click Cohere change my ads?**
 
-Campaign checks do not publish ads or edit creative. You can separately enable automatic pausing after repeated landing-page failures. That option requires Meta permission and two consecutive failed checks.
+Campaign checks do not publish ads or edit creative. Optional automatic pausing is in beta and requires you to accept a warning before enabling it. It can pause monitored campaigns after two confirmed page failures and a fresh recheck, with campaign management permission. Blocked or uncertain checks do not qualify. Paused campaigns must be restarted manually in Meta Ads.
 
 **How often are destinations checked?**
 
-Paid campaign watches are scheduled every 30 minutes; the free monitoring preview uses a one-hour interval. Each run refreshes the campaign's current destinations from Meta before inspecting them.
+Paid campaign watches are scheduled every 30 minutes; the free monitoring trial runs every hour. Each run refreshes the campaign’s current destinations from Meta before inspecting them.
+
+**Do I need a credit card for the trial?**
+
+No. Your free preview includes 10 ad analyses in total and 14 days of monitoring for up to 3 landing pages. The monitoring trial starts with your first watch. When it ends, monitoring stops and your saved reports remain available. There is no automatic charge.
 
 **What if a detail cannot be verified?**
 
 It is marked “Could not confirm.” Some content comparisons use an optional AI service. Findings include source details so you can make the final call.
-
-**Does it test the whole checkout?**
-
-Click Cohere inspects the HTML served by the destination page. It does not complete purchases or validate the checkout flow. Dynamic or ambiguous details may need your review.
 
 ### Closing action
 
@@ -84,7 +96,7 @@ Click Cohere inspects the HTML served by the destination page. It does not compl
 
 Bring your campaigns and landing pages into the same view.
 
-Action: Create your workspace → `#/signup`
+Action: Create your account → `#/signup`
 
 Secondary link: Already have an account? Log in → `#/login`
 
@@ -96,7 +108,7 @@ Product claims were checked against the current application and backend document
 
 - `/` is a public landing page that renders without contacting the backend.
 - `#/login` and `#/signup` open the existing authentication screens in the correct mode.
-- Existing protected workspace and report links continue to work.
+- Existing protected account and report links continue to work.
 - Preserve authentication callbacks, password-manager support, and existing sessions.
 - Verify navigation, example tabs, FAQ, authentication links, keyboard access, reduced motion, and mobile layouts.
 

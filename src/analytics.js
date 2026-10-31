@@ -109,7 +109,7 @@ export function startAnalytics() {
   return configurationPromise;
 }
 
-// A completed report is a product outcome, recorded with a workspace ID only.
+// A completed report is a product outcome, recorded with an internal account ID only.
 export async function recordReportView(runId) {
   if (!runId || viewedReports.has(runId)) return;
   if (await post("/api/analytics/report-view", { runId })) viewedReports.add(runId);
