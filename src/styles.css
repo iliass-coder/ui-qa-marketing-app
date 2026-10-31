@@ -391,10 +391,8 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
 .auth-switch > a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .login-story::after { content: ""; position: absolute; width: 700px; height: 700px; border: 1px solid #ffffff06; border-radius: 50%; left: -285px; bottom: -300px; box-shadow: 0 0 0 80px #ffffff02, 0 0 0 160px #ffffff02; pointer-events: none; }
 .login-story-copy { margin-block: auto; padding: 70px 0; position: relative; z-index: 1; }
-.login-story .health-kicker { color: #aab7b1; font-size: 11px; }
 .login-story h2 { font: 500 clamp(36px,3.5vw,55px)/1.2 var(--font-display); letter-spacing: -2px; margin: 23px 0; }
 .login-story-copy > p { max-width: 340px; font-size: 14px; line-height: 1.9; color: #aab7b1; }
-.login-story-foot { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #aab7b1; position: relative; z-index: 1; }
 .auth-diagram { display: flex; align-items: center; margin-top: 52px; max-width: 360px; }
 .auth-diagram > div { display: grid; justify-items: center; gap: 14px; font-size: 10px; color: #c5cfc9; flex: 0 0 auto; }
 .auth-diagram > div > .icon { background: #ffffff05; border: 1px solid #ffffff19; padding: 16px; width: 62px; height: 62px; border-radius: 12px; }
@@ -753,7 +751,7 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
   .login-story h2 { font-size: 36px; letter-spacing: -1.4px; margin: 17px 0; }
   .login-story h2 br { display: none; }
   .login-story-copy > p { font-size: 13px; margin-bottom: 0; }
-  .login-story .health-kicker, .auth-diagram, .login-story-foot { display: none; }
+  .auth-diagram { display: none; }
   .login-form-region { padding: 20px 25px 28px; }
   .login-card { max-width: 100%; padding-block: 25px; }
   .login-card h1 { font-size: 28px; }
