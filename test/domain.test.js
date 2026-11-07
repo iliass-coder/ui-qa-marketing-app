@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { campaignIsLive, campaignPhase, statusTone, valueText } from "../src/domain.js";
-import { groupIncidents, incidentValueText } from "../src/incidents.js";
+import { groupIncidents, incidentValueText, issueCategory, issueCounts, issueTitle, issueValue, watchState } from "../src/incidents.js";
 
 test("campaign state distinguishes active, future, and paused campaigns", () => {
   const now = Date.parse("2026-10-10T12:00:00Z");
@@ -28,16 +28,18 @@ test("incident summaries combine repeated records and keep open issues visible a
     { id: "new-price", type: "prices", siteId: "page-a", status: "RESOLVED", lastSeenAt: "2026-10-19T20:00:00Z" },
     { id: "open-price", type: "prices", siteId: "page-a", status: "OPEN", lastSeenAt: "2026-10-19T19:00:00Z" },
     { id: "other-page", type: "prices", siteId: "page-b", status: "OPEN", lastSeenAt: "2026-10-19T18:00:00Z" },
-    { id: "new-content", type: "content", siteId: "page-a", status: "RESOLVED", lastSeenAt: "2026-10-19T21:00:00Z" }
+    { id: "new-content", type: "content", siteId: "page-a", status: "RESOLVED", lastSeenAt: "2026-10-19T21:00:00Z" },
+    { id: "outage", type: "availability", category: "INCIDENT", siteId: "page-c", status: "OPEN", lastSeenAt: "2026-10-19T17:00:00Z" }
   ];
   const summaries = groupIncidents(records);
   assert.equal(summaries.length, 2);
-  assert.equal(summaries[0].type, "prices");
-  assert.equal(summaries[0].totalCount, 3);
-  assert.equal(summaries[0].openCount, 2);
-  assert.equal(summaries[0].pageCount, 2);
-  assert.equal(summaries[0].representative.id, "open-price");
-  assert.equal(summaries[0].latest.id, "new-price");
+  assert.equal(summaries[0].type, "INCIDENT");
+  assert.equal(summaries[1].type, "WARNING");
+  assert.equal(summaries[1].totalCount, 4);
+  assert.equal(summaries[1].openCount, 2);
+  assert.equal(summaries[1].pageCount, 2);
+  assert.equal(summaries[1].representative.id, "open-price");
+  assert.equal(summaries[1].latest.id, "new-content");
   assert.equal(records[0].id, "new-price");
 });
 
@@ -48,7 +50,7 @@ test("different missing claims produce one summary and repeated observations of 
     { type: "claim:Free shipping", siteId: "page-a", status: "INTENTIONAL" }
   ]);
   assert.equal(summaries.length, 1);
-  assert.equal(summaries[0].type, "claims");
+  assert.equal(summaries[0].type, "WARNING");
   assert.equal(summaries[0].openCount, 2);
   assert.equal(summaries[0].pageCount, 1);
   assert.deepEqual(groupIncidents([]), []);
@@ -74,4 +76,27 @@ test("intentional settings remain visible when newer history shows a recovery", 
   assert.equal(reverted.intentionalCount, 0);
   assert.equal(reverted.openCount, 1);
   assert.equal(reverted.representative.id, "fresh-failure");
+});
+
+test("only verified outage evidence is an incident and missing evidence stays a warning", () => {
+  for (const status of [404, 410, 500, 503, 599]) assert.equal(issueCategory({ type: "availability", evidenceJson: { httpStatus: status, errorCode: "HTTP_ERROR" } }), "INCIDENT");
+  for (const issue of [{ type: "availability" }, { type: "availability", evidenceJson: { httpStatus: 503, errorCode: "BOT_CHALLENGE" } }, { type: "availability", evidenceJson: { httpStatus: 429, errorCode: "HTTP_ERROR" } }, { type: "qa:copy_quality:ad", category: "WARNING" }]) assert.equal(issueCategory(issue), "WARNING");
+  assert.equal(issueTitle({ type: "availability", category: "WARNING" }), "Page check needs review");
+  assert.equal(issueTitle({ type: "qa:copy_quality:ad", category: "WARNING" }), "Spelling or grammar needs review");
+});
+
+test("watch status separates warnings and incidents and never hides them behind a green enabled badge", () => {
+  const item = { monitoringEnabled: true, monitoringDestinationCount: 1, lastMonitoringAt: "2026-10-31T12:00:00Z" };
+  const warning = { status: "OPEN", category: "WARNING" };
+  const outage = { status: "OPEN", category: "INCIDENT", pauseState: "CONFIRMING" };
+  assert.deepEqual(issueCounts([warning, outage, { ...outage, status: "RESOLVED" }]), { incidents: 1, warnings: 1 });
+  assert.equal(watchState(item, [warning], { monitoringActive: true }).value, "WARNING");
+  assert.equal(watchState(item, [warning, outage], { monitoringActive: true }).value, "FAIL");
+  assert.equal(watchState(item, [{ ...outage, pauseState: "PAUSED_AUTOMATICALLY" }], { monitoringActive: true }).label, "Paused automatically");
+  assert.equal(watchState(item, [], { monitoringActive: false }).label, "Coverage paused");
+  assert.equal(watchState(item, [], { monitoringActive: true }).label, "No open issues");
+});
+
+test("response time evidence is expressed in seconds", () => {
+  assert.equal(issueValue({ type: "server_response_time" }, { value: 12500 }), "12.5 seconds");
 });

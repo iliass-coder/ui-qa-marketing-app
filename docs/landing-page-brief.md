@@ -1,121 +1,74 @@
-# Click Cohere landing page — design and content
+# Click Cohere public homepage: product proof and crawlability
 
-## Central idea
+Updated 2026-11-04. Implementation and verification are local. The production site requires a fresh deployment containing both frontend and backend changes.
 
-A paid click is a handoff between an ad's promise and a landing page. Make that handoff the visual and editorial signature of Click Cohere. Speak to people running Meta campaigns who need to review destinations before launch and monitor them afterward.
+## Hero and recording
 
-## Hero — final copy
+Preserve the live headline: **Your ad makes a promise. Make sure the page keeps it.** The new subhead is **Catch broken destinations and conflicting offers in your Meta ads. Check campaigns before activation and monitor their landing pages after launch.**
 
-Eyebrow: **CAMPAIGN ASSURANCE FOR META ADS**
+The primary action is **Start your free preview** (`#/signup`). **Watch a campaign check** links to the existing `#product-example` section and starts the native player. Before/After Launch tabs seek to the corresponding part of the recording, with keyboard Left/Right/Home/End support. Additional chapter buttons jump to the ad copy, landing-page response, and incident evidence.
 
-Headline: **Your ad makes a promise. Make sure the page keeps it.**
+The supplied `Click-Cohere-demo-campaign-watch.mp4` is a 56.88-second, 1920 x 1080 H.264/AAC product walkthrough. The public copy is unchanged at `public/media/Click-Cohere-demo-campaign-watch.mp4`. The poster is a frame from the recording, not an invented screen. The video uses native controls, inline mobile playback, no autoplay on page load, and `preload="none"`. An English caption track and an expandable transcript/evidence summary accompany it.
 
-Supporting copy: Catch the disconnect between your Meta ads and their landing pages. Check before launch. Keep watch after.
+The recording contains the published, paused Revetement campaign; ad-copy source text and its suggested spelling correction; a landing-page HTTP 404 with FAIL, HTTP_ERROR, and 2,464 captured characters; a captured-page-evidence entry; and the corresponding monitoring incident. The copy does not imply that the raw captured evidence panel is expanded in the recording. The visible cadence note makes clear that the recording's 30-minute schedule is for paid plans; free-preview checks run hourly.
 
-Primary action: **Create your account** → `#/signup`
+## Verified billing units
 
-Secondary action: **See it in action** → product example
+The homepage note and FAQ now explain:
 
-Supporting line: Read-only campaign checks. Optional campaign pausing.
+- A fresh campaign QA run consumes one analysis per ad checked, even if multiple ads share a URL.
+- Scheduled landing-page inspections do not consume analysis credits. They use the plan's monitored-page allowance.
+- A shared destination URL counts once across the workspace. Different query strings, including tracking-tag variants, count separately. Fragments do not add a page.
 
-## Visual direction
+Implementation evidence: `billing/UsageService.java` reserves by `(run_id, ad_id)` and defines URL identity in `pageKey`, `campaignPages`, and `desired`. `service/QaService.java` makes the analysis reservations/completions. `jobs/MonitoringScheduler.java` and `service/MonitoringService.java` enforce page capacity without reserving ad analyses. Existing BillingIntegrationTest coverage checks shared pages and query variants.
 
-- Preserve the ivory, slate, coral, sage, and muted blue palette of the application.
-- Use the same locally hosted Manrope and Inter fonts, with a larger editorial scale for the public page.
-- Pair a generous, left-aligned headline with a bespoke product illustration: the ad's promise and its destination, connected through a Click Cohere finding.
-- Let visitors switch the illustration between **Before launch** and **After launch**. Clearly label all sample data as an illustrative example.
-- Use fine rules, numbered sections, small evidence labels, and a dark monitoring section. Keep the presentation calm and spacious.
-- Navigation: Product, How it works, Questions, Log in, Get started. On phones, provide an accessible menu.
-- Use the linked C brand mark and Click Cohere wordmark consistently, alongside the application's line icons.
+Existing prices, quotas, 14-day trial start rules, and no-card terms remain driven by `src/plans.js` and the backend plan catalog. The free preview includes 10 ad analyses and 14 days of hourly inspections for up to 3 pages. Paid inspections are scheduled every 30 minutes; this is not a guaranteed detection deadline.
 
-## Page story and final section copy
+## Verified Meta access
 
-### 01 — The handoff
+The shared `MetaAccessNotice` appears next to Connect Meta on the homepage and before in-app connection/reconnection actions, including Settings and the access-expiry notice.
 
-**Every click is a handoff.**
+The actual flow in `meta/MetaMarketingClient.java` requests **ads_read and ads_management together**. Standard checks need read access; optional pausing needs management permission. `MetaSyncService.connect` requires a granted `ads_read` scope, while campaign pausing separately requires `ads_management`, opt-in, beta acceptance, and confirmation safeguards. The new copy explicitly states that management access is requested by the current authorization; it does not claim a separate later permission prompt.
 
-The offer. The destination. The details that changed overnight. Give them a second look before someone else discovers the disconnect.
+Settings → Meta Ads → Disconnect removes the saved local connection through `DELETE /api/integrations/meta` and `MetaSyncService.disconnect`. It does not revoke Meta permissions remotely or restart paused campaigns. No OAuth scopes or campaign behavior were changed by this revision.
 
-Feature headings and descriptions:
+## Initial HTML and routing
 
-1. **A destination worth the click.** Surface broken links, unreachable pages, and unexpected destination changes.
-2. **An offer that tells the same story.** Review the campaign and page together, including promotions, availability, and delivery details.
-3. **Findings you can follow.** See what was expected, what was found, and the evidence behind the result.
+`npm run build` runs Vite and then renders the same `LandingPage` component with React's server renderer into `dist/index.html`. This delivers the headline, concrete description, pricing, and complete FAQ answer text before JavaScript runs. Native FAQ controls also work with JavaScript disabled. Copy is not duplicated in a separate crawler-only template.
 
-### 02 — Monitoring
+`main.jsx` hydrates the pre-rendered public home. Direct signup, recovery, plan-intent, and protected hash routes still render their existing screens. The rendered year is passed from the HTML into React so cached pages do not produce a footer hydration mismatch at a year boundary.
 
-**Launch is a moment. Your page keeps moving.**
+Use the production preview (`npm run preview -- --port 4173`) to inspect initial HTML. Vite development mode continues to use its development entry point.
 
-Start a campaign watch to keep checking its current destinations. Each scheduled run refreshes the campaign from Meta before inspecting the pages.
+## Crawl and deployment changes
 
-Facts: Paid inspections every 30 minutes; free preview inspections every hour. Current Meta destinations. Changes recorded as incidents.
+Anonymous live checks on 2026-11-04 returned **401**, not 500, for both crawl files. The live homepage returned 200. The security allowlist omitted crawl resources; missing static resources also fell through to a generic internal-error handler.
 
-Action: Explore campaign watch → after-launch example.
+- `public/robots.txt` allows public pages, excludes API/OAuth/documentation paths, and advertises the canonical sitemap.
+- `public/sitemap.xml` contains the canonical homepage, support, privacy, terms, and refunds URLs. It excludes hash routes, private app pages, and the legacy Render hostname.
+- Spring's exact public GET/HEAD allowlist now includes crawl files, the sharing image, and `/media/**`. Private API authentication remains unchanged.
+- Missing public files return 404 through a specific NoResourceFoundException handler.
+- `PublicAssetConfig` supplies explicit text/plain, application/xml, and text/vtt MIME mappings. The caption mapping was necessary on the local Spring/Tomcat server.
+- `deployment/Dockerfile` and `Prepare-Release.ps1` include the frontend `scripts/` directory so the production build can run the pre-render step. Frontend `dist/` is still copied into Spring static resources by the existing Docker build.
 
-### 03 — Getting started
+A source release must include both projects and the updated Dockerfile. The existing release-preparation script includes all current working changes, so inspect unrelated work before publishing a release. No production deployment or private account operation was performed during these checks.
 
-**A clearer view in three moves.**
+## Validation and production follow-up
 
-1. **Connect Meta.** Choose the Meta ad accounts you want to connect.
-2. **Check a campaign.** Review its destinations and the findings that need your judgment.
-3. **Keep watch.** Turn on monitoring for the campaigns you want to follow after launch.
+Local checks cover the production frontend build; the 30 existing frontend tests; billing and Meta token regressions; actual anonymous HTTP responses through Spring; crawl-file GET/HEAD, body validity and MIME types; all sitemap targets; a video byte-range request; caption/poster/sharing assets; 404 behavior; protected API 401 behavior; desktop/mobile hero actions and signup; keyboard chapters; native FAQ interactions; and initial HTML with JavaScript disabled.
 
-### Questions
+Results: 30 frontend tests, 20 billing tests, 9 Meta token tests, and 5 real-HTTP website tests passed. Responsive checks passed at 320, 390, 768, 1024, and 1440 CSS pixels. The Settings disclosure was also verified before its authorization button on a mobile fixture with no real account or OAuth changes. The production video returned HTTP 206 for byte-range requests through the local Spring server. Crawl GET/HEAD returned 200 with text/plain and application/xml, and captions returned text/vtt. The separate frontend-only preview has no running API, so its optional analytics-config proxy request returns 500; that is not the crawl-file test result.
 
-**Can I check a campaign before it goes live?**
+The backend HTTP contract suite uses the actual built frontend rather than copied fixtures. Run it with JDK 21, after the frontend build:
 
-Yes. Publish your campaign, ad sets, and ads in Meta Ads Manager with the campaign set to Paused, then sync in Click Cohere and run a check. Drafts and unpublished edits cannot be checked. Campaigns that are already live can be checked too.
+```powershell
+mvn.cmd -B -ntp '-Dtest=PublicWebsiteTest' '-Dwebsite.static-location=file:///C:/path/to/ui-qa-marketing-app/dist/' test
+```
 
-**Do I need to sync after making changes in Meta?**
+It uses the isolated test profile/H2 database and disables email. It is opt-in so the independent backend repository does not require a frontend checkout for its usual test command.
 
-Yes. After publishing a new campaign or changing your ads, budget, targeting, or landing-page links in Meta Ads Manager, click Sync campaigns in Click Cohere. Wait for the sync to finish, then run a new check. Without syncing, a new check can still use older campaign data.
+After deployment, verify on `https://www.clickcohere.com/`: raw initial HTML, crawl-file GET/HEAD 200 and content types, canonical sitemap targets, video playback/seeking and captions, both hero actions, direct signup and plan-intent routes, and FAQ interactions on desktop/mobile. Refresh cached crawler responses as needed. Complete a real Meta consent/reconnect/disconnect check only with a designated test account; no real permission grant or campaign action was exercised locally.
 
-**How long does a campaign check take?**
+## Existing design and industry voices
 
-Allow a few seconds for the check to complete. Larger campaigns or slower landing pages can take longer. You can keep working while it runs; we'll let you know in the app when your report is ready.
-
-**Does Click Cohere change my ads?**
-
-Campaign checks do not publish ads or edit creative. Optional automatic pausing is in beta and requires you to accept a warning before enabling it. It can pause monitored campaigns after two confirmed page failures and a fresh recheck, with campaign management permission. Blocked or uncertain checks do not qualify. Paused campaigns must be restarted manually in Meta Ads.
-
-**How often are destinations checked?**
-
-Paid campaign watches are scheduled every 30 minutes; the free monitoring trial runs every hour. Each run refreshes the campaign’s current destinations from Meta before inspecting them.
-
-**Do I need a credit card for the trial?**
-
-No. Your free preview includes 10 ad analyses in total and 14 days of monitoring for up to 3 landing pages. The monitoring trial starts with your first watch. When it ends, monitoring stops and your saved reports remain available. There is no automatic charge.
-
-**What if a detail cannot be verified?**
-
-It is marked “Could not confirm.” Some content comparisons use an optional AI service. Findings include source details so you can make the final call.
-
-### Closing action
-
-**Give your next click a better landing.**
-
-Bring your campaigns and landing pages into the same view.
-
-Action: Create your account → `#/signup`
-
-Secondary link: Already have an account? Log in → `#/login`
-
-## Content guardrails
-
-Product claims were checked against the current application and backend documentation. Do not invent customer logos, testimonials, usage counts, revenue savings, pricing, free-trial terms, or instant-detection guarantees. Distinguish manual QA from scheduled monitoring, and optional pausing from read-only checks.
-
-## Routing and acceptance
-
-- `/` is a public landing page that renders without contacting the backend.
-- `#/login` and `#/signup` open the existing authentication screens in the correct mode.
-- Existing protected account and report links continue to work.
-- Preserve authentication callbacks, password-manager support, and existing sessions.
-- Verify navigation, example tabs, FAQ, authentication links, keyboard access, reduced motion, and mobile layouts.
-
-## Composition references
-
-[Plain](https://www.plain.com/) and [incident.io](https://incident.io/) informed the use of a clear product story and product-focused examples. The headline, copy, illustrations, and page composition are original to Click Cohere.
-
-## Pricing update
-
-The public page now includes Free Preview (10 analyses total and 14 days of monitoring for 3 pages, without a credit card), Starter ($39/month, 100 analyses, 5 pages, 1 Meta account), and Growth ($99/month, 500 analyses, 25 pages, 3 accounts). Agency is available by arrangement from $249/month. Analysis packs cost $15 for 100, valid for 90 days. The pricing section follows the existing ivory, coral, and sage palette, with Growth in a dark feature card. All public terms mirror backend entitlements documented in `qa-marketing-integration/docs/billing.md`.
+Retain ivory, slate, coral, sage, muted blue, and local Manrope/Inter fonts. Industry commentary remains clearly distinguished from customer reviews or endorsements, with original-source links for Michelle Polizzi (HubSpot), Alex Birkett (CXL), and Oli Gardner (MarketingProfs). No invented customer claims, savings, or conversion lift is added. The code-native social thumbnail and its editable source remain available in `public/og-image.png` and `scripts/og-card.html`.

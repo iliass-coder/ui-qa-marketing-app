@@ -25,6 +25,10 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
+.meta-access-notice { max-width: 720px; margin: 16px 0; padding-left: 13px; border-left: 2px solid #aab7a0; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.meta-access-notice strong { color: var(--ink); font-weight: 600; }
+.meta-access-notice.is-compact { font-size: 12px; margin-block: 12px; }
+.meta-connect-action { max-width: 380px; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 button, input, select, textarea { font: inherit; }
@@ -380,9 +384,12 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
 .spinner { width: 24px; height: 24px; border: 2px solid var(--line); border-top-color: var(--coral); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .text-button { padding: 0; border: 0; background: transparent; color: var(--coral); cursor: pointer; font-size: inherit; font-weight: 500; }
-.app-footer { display: flex; justify-content: space-between; align-items: center; gap: 15px; max-width: 1560px; margin: 0 auto; padding: 0 40px 28px; color: #849087; font-size: 10px; }
+.app-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 15px; max-width: 1560px; margin: 0 auto; padding: 0 40px 28px; color: #849087; font-size: 10px; }
 .app-footer > span { display: flex; align-items: center; gap: 8px; }
 .app-footer > span:first-child > span { opacity: .45; padding-inline: 3px; }
+.app-footer > nav { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.app-footer a { text-decoration: none; }
+.app-footer a:hover { color: var(--coral); text-decoration: underline; }
 
 .login-page { display: grid; grid-template-columns: .95fr 1.05fr; min-height: 100vh; background: var(--white); }
 .login-story { background: var(--rail); color: var(--paper); padding: 45px 56px 35px; display: flex; flex-direction: column; position: relative; overflow: hidden; }
@@ -730,7 +737,6 @@ input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #afb9b0;
   .security-note { font-size: 10px; line-height: 1.6; align-items: flex-start; }
   .account-details { padding: 15px; gap: 17px 12px; }
   .app-footer { padding: 0 20px 100px; font-size: 10px; }
-  .app-footer > span:last-child { display: none; }
   .toast { bottom: 90px; right: 20px; padding: 14px 17px; font-size: 13px; }
   .report-summary { grid-template-columns: repeat(3,minmax(0,1fr)); padding: 20px; gap: 20px 12px; }
   .report-verdict, .report-last-run, .report-summary > .button { grid-column: 1/-1; }

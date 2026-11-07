@@ -27,6 +27,7 @@ export function resolveRoute(hash = "", search = "") {
     if (filters.get("campaign")) route.campaignId = filters.get("campaign");
     if (filters.get("type")) route.type = filters.get("type");
     if (filters.get("status")) route.status = filters.get("status");
+    if (["INCIDENT", "WARNING"].includes(filters.get("category"))) route.category = filters.get("category");
     return route;
   }
   const pages = ["login", "signup", "forgot-password", "overview", "campaigns", "site-watch", "settings"];

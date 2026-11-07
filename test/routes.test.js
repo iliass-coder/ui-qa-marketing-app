@@ -27,6 +27,8 @@ test("incident reports support direct links and preserve campaign, type, and sta
   const filters = { campaignId: "campaign-42", type: "claim:Free shipping & returns", status: "OPEN" };
   assert.deepEqual(resolveRoute(incidentReportHref(filters)), { page: "incidents", ...filters });
   assert.deepEqual(resolveRoute(incidentReportHref({ campaignId: "campaign-42", type: "claims" })), { page: "incidents", campaignId: "campaign-42", type: "claims" });
+  assert.deepEqual(resolveRoute(incidentReportHref({ category: "WARNING", status: "HISTORY" })), { page: "incidents", category: "WARNING", status: "HISTORY" });
+  assert.deepEqual(resolveRoute(incidentReportHref({ category: "INCIDENT", status: "OPEN" })), { page: "incidents", category: "INCIDENT", status: "OPEN" });
 });
 
 test("recovery routes retain confirmation tokens in the URL fragment", () => {

@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { Brand } from "./Brand.jsx";
 import { Icon } from "./icons.jsx";
 import { formatDate } from "./domain.js";
+import { SupportLink } from "./support.jsx";
+import { MetaAccessNotice } from "./MetaAccessNotice.jsx";
 
 const deletionDetails = (account) => account?.deletionRemovesData === false
   ? "Your account and all its sessions will be deleted. Data used by other authorized users will be retained."
@@ -23,7 +25,7 @@ export function MetaConnectionNotice({ meta }) {
   const message = messages[status] || messages[connection.status];
   if (!message) return null;
   return <div className="alert connection-alert token-notice" role="status">
-    <div><strong><Icon name="warning" size={17} /> {message[0]}</strong><span>{message[1]}</span></div>
+    <div><strong><Icon name="warning" size={17} /> {message[0]}</strong><span>{message[1]}</span><MetaAccessNotice compact /></div>
     <a className="button secondary" href="/api/integrations/meta/connect"><Icon name="link" size={16} />Reconnect Meta Ads</a>
   </div>;
 }
@@ -76,7 +78,7 @@ export function RecoveryPage({ mode, token = "", request, enabled, account, onSi
         </> : <label>Email address<input type="email" name="email" autoComplete="email" required maxLength="254" /></label>}
         <button className={`button ${deleting ? "danger" : "primary"}`} disabled={busy || (!deleting && !resetting && enabled !== true)} type="submit">{busy ? "Working…" : deleting ? "Permanently delete my account" : resetting ? "Reset password" : "Send reset link"}</button>
       </form>}
-      {!deleting && !resetting && enabled === false && <p className="account-help">Recovery email is currently unavailable. Contact support.</p>}
+      <p className="account-help">{!deleting && !resetting && enabled === false && "Recovery email is currently unavailable. "}Need help? Email <SupportLink />.</p>
       <a className="text-link recovery-back" href={deleting ? "#/settings" : "#/login"}>{deleting ? "Cancel and return to settings" : "Back to sign in"}</a>
     </section>
   </main>;
@@ -138,6 +140,6 @@ export function AccountSettings({ account, request, onSignedOut }) {
     <div className="account-deletion"><h3>Delete account</h3><p>{deletionDetails(account)} All your devices will be signed out. You will confirm using a link sent to your account email.</p><p>Your campaigns in Meta will remain in their current state.</p>
       <button className="button danger" disabled={Boolean(busy) || !emailEnabled} onClick={() => sendEmail(true)}>{busy === "delete" ? "Sending…" : "Email deletion confirmation"}</button>
     </div>
-    {!emailEnabled && <p className="account-help">Recovery emails are currently unavailable. Contact support for account recovery or deletion.</p>}
+    <p className="account-help">{!emailEnabled && "Recovery emails are currently unavailable. "}For help with account recovery or deletion, email <SupportLink />.</p>
   </section>;
 }

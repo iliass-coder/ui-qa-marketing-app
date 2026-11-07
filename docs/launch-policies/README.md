@@ -6,7 +6,7 @@ The final source files are in `public/`; the former drafts have been moved there
 - [Terms of service](https://www.clickcohere.com/terms.html): `public/terms.html`.
 - [Refunds and cancellation](https://www.clickcohere.com/refunds.html): `public/refunds.html`.
 
-The operator is **Elamrani Technologies Inc., Canada**, as supplied by the owner. Account, billing, and privacy contact: `iliass.elamrani@outlook.com`. All three policies are effective October 25, 2026 and include canonical URLs, shared styling, navigation, and public GET access through Spring Security. Links appear in the landing-page footer, signup, Plan & usage, and support page.
+The operator is **Elamrani Technologies Inc., Canada**, as supplied by the owner. Account, billing, and privacy contact: `support@clickcohere.com`. All three policies are effective October 25, 2026 and include canonical URLs, shared styling, navigation, and public GET access through Spring Security. Links appear in the landing-page footer, signup, Plan & usage, and support page.
 
 Refunds are requested through support. Subscription refunds are proportional to unused time in the current paid billing period, including renewals; an earlier cancellation ends paid access. Portal cancellation by itself stops renewal at period end and does not issue a refund. Unused, unexpired purchased analysis credits are refundable in proportion to the pack price paid. Used time, used credits, and completed billing periods are excluded, subject to mandatory legal rights. The page includes calculation examples and explains that refunds are handled manually.
 

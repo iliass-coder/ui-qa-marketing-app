@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /oauth2/
+Disallow: /login/oauth2/
+Disallow: /docs
+Disallow: /swagger-ui/
+Disallow: /v3/api-docs/
+
+Sitemap: https://www.clickcohere.com/sitemap.xml

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "build": "node scripts/build.mjs",
+    "preview": "vite preview --host 127.0.0.1",
     "test": "node --test test/domain.test.js test/routes.test.js test/analytics.test.js test/qaRuns.test.js"
   },
   "dependencies": {

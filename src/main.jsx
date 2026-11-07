@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import { campaignPhase, formatDate, statusTone, valueText } from "./domain.js";
 import { Icon } from "./icons.jsx";
 import { Brand } from "./Brand.jsx";
 import { LandingPage } from "./LandingPage.jsx";
 import { AccountSettings, MetaConnectionNotice, RecoveryPage } from "./AccountAccess.jsx";
 import { BillingPage, BillingNotice } from "./Billing.jsx";
+import { SUPPORT_EMAIL, SupportLink } from "./support.jsx";
+import { MetaAccessNotice } from "./MetaAccessNotice.jsx";
 import { resolveRoute } from "./routes.js";
 import { watchSessionActivity } from "./session.js";
 import { AnalyticsConsent } from "./AnalyticsConsent.jsx";
 import { recordReportView } from "./analytics.js";
 import { QaNotifications, QaProgress, useQaChecks } from "./QaChecks.jsx";
 import { isQaActive, latestQaRun } from "./qaRuns.js";
-import { INCIDENT_REPORT_LIMIT, INCIDENT_TYPES, groupIncidents, incidentReportHref, incidentType, incidentTypeLabel, incidentValueText } from "./incidents.js";
+import { incidentReportHref, incidentTypeLabel, issueCategory, issueTitle } from "./incidents.js";
+import { Button, Empty, PageHeading, Status } from "./ui.jsx";
+import { SiteWatch, IncidentReport } from "./Monitoring.jsx";
 import "./styles.css";
 import "./overview.css";
 
@@ -42,8 +46,8 @@ const request = async (path, options = {}) => {
       AD_ACCOUNT_LIMIT_REACHED: "Your plan does not cover this many Meta accounts. Select fewer accounts or upgrade in Plan & usage.",
       TRIAL_EXPIRED: "Your monitoring trial has ended. Choose a plan in Plan & usage to resume your watches.",
       MONITORING_NOT_ENABLED: "Start a watch for this campaign before requesting a monitoring recheck.",
-      BILLING_NOT_CONFIGURED: "Paid checkout is not available yet. Contact support.",
-      STRIPE_REQUEST_FAILED: "Stripe could not complete this request. Try again or contact support.",
+      BILLING_NOT_CONFIGURED: `Paid checkout is not available yet. Contact ${SUPPORT_EMAIL}.`,
+      STRIPE_REQUEST_FAILED: `Stripe could not complete this request. Try again or contact ${SUPPORT_EMAIL}.`,
       STRIPE_UNAVAILABLE: "Stripe is temporarily unavailable. Your current plan has not changed; try again shortly.",
       SUBSCRIPTION_REQUIRED: "Choose a paid plan before purchasing additional analyses.",
       INTENTIONAL_SETTING_NOT_ACTIVE: "This incident type is already using normal monitoring. Refresh to see its current status.",
@@ -55,7 +59,7 @@ const request = async (path, options = {}) => {
       EMAIL_NOT_VERIFIED: "Verify your email using the link we sent before signing in.",
       EMAIL_ALREADY_REGISTERED: "An account already uses this email. Sign in instead.",
       GOOGLE_NOT_CONFIGURED: "Google sign-in is not configured on the backend yet.",
-      ACCOUNT_RECOVERY_NOT_CONFIGURED: "Recovery email is currently unavailable. Contact support.",
+      ACCOUNT_RECOVERY_NOT_CONFIGURED: `Recovery email is currently unavailable. Contact ${SUPPORT_EMAIL}.`,
       INVALID_OR_EXPIRED_RESET: "This password reset link is invalid, expired, or already used. Request a new link.",
       INVALID_OR_EXPIRED_DELETION: "This deletion link is invalid, expired, or already used. Request a new confirmation email in settings.",
       CURRENT_PASSWORD_INCORRECT: "Your current password was not accepted.",
@@ -102,24 +106,6 @@ function routeFromHash() {
 
 function navigate(path) {
   window.location.hash = `/${path}`;
-}
-
-function Button({ children, icon, kind = "secondary", className = "", ...props }) {
-  return <button className={`button ${kind} ${className}`} {...props}>{icon && <Icon name={icon} size={16} />}{children}</button>;
-}
-
-function Status({ value, label }) {
-  const raw = label || value || "Not checked";
-  const text = ({ STALE: "Out of date", PASS: "Passed", FAIL: "Needs action", WARNING: "Review needed", UNKNOWN: "Not checked", OPEN: "Open", CONNECTED: "Connected", RESOLVED: "Resolved", INTENTIONAL: "Intentional", REVERTED: "Reverted" })[raw] || metaCodeLabel(raw);
-  return <span className={`status ${statusTone(value)}`}><span className="status-dot" aria-hidden="true" />{text}</span>;
-}
-
-function Empty({ title, children, action }) {
-  return <div className="empty-state"><span className="empty-mark"><Icon name="shield" size={25} /></span><h3>{title}</h3><p>{children}</p>{action}</div>;
-}
-
-function PageHeading({ eyebrow, title, children, action }) {
-  return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{children && <p>{children}</p>}</div>{action && <div className="heading-actions">{action}</div>}</div>;
 }
 
 function Metric({ label, value, note, tone = "", icon }) {
@@ -516,7 +502,7 @@ function App() {
         ...(action === "mark-intentional" ? { body: { note: "Marked intentional until this decision is explicitly reverted." } } : {})
       });
       if (action === "revert-intentional" && result?.recheckQueued === false) {
-        await reload(); setToast("Intentional setting reverted. Resume monitoring coverage to request a fresh inspection."); return;
+        await reload(); setToast(result.source === "QA" ? "Warning alerts restored. Run a new campaign check to refresh this finding." : "Alerts restored. Resume monitoring coverage to request a fresh inspection."); return;
       }
       if (action === "revert-intentional") {
         reverted = true;
@@ -529,7 +515,7 @@ function App() {
       }
       await reload();
       setToast(action === "mark-intentional"
-        ? "This incident type will stay intentional until you revert it."
+        ? "Warning accepted. You can restore alerts from History."
         : action === "revert-intentional"
           ? "Normal monitoring restored. A fresh inspection has completed."
           : "Fresh inspection completed. Incident status reflects the verified result.");
@@ -561,13 +547,13 @@ function App() {
     return <RecoveryPage key={`${route.page}:${route.token || ""}`} mode={route.page} token={route.token} request={request} enabled={passwordRecoveryEnabled} account={user} onSignedOut={accountSignedOut} />;
   }
   if (auth === "signed-out") {
-    return <main className="login-page"><aside className="login-story"><a href="/" className="login-brand" aria-label="Click Cohere home"><Brand /></a><div className="login-story-copy"><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>Click Cohere</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div></aside><div className="login-form-region"><section className="login-card">
-      <h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start with 10 ad analyses and a 14-day monitoring preview. No credit card required." : "Sign in and see how your campaigns are doing."}</p>
+    return <main className="login-page"><aside className="login-story"><a href="/" className="login-brand" aria-label="Click Cohere home"><Brand /></a><div className="login-story-copy"><div className="health-kicker">EVERY CLICK, CONNECTED</div><h2>Confidence before <br />every click.</h2><p>From your first campaign check to the pages already live. Stay one step ahead of what needs your attention.</p><div className="auth-diagram" aria-hidden="true"><div><Icon name="campaigns" size={27} /><span>Your campaign</span></div><span className="diagram-connector" /><div className="diagram-center"><Icon name="shield" size={35} /><span>Click Cohere</span></div><span className="diagram-connector" /><div><Icon name="globe" size={27} /><span>Landing page</span></div></div></div><div className="login-story-foot"><Icon name="shield" size={16} /> Your ad. Your page. One connected story.</div></aside><div className="login-form-region"><section className="login-card">
+      <div className="eyebrow">CAMPAIGN ASSURANCE</div><h1>{authMode === "signup" ? "Make room for clarity." : "Welcome back."}</h1><p>{authMode === "signup" ? "Start with 10 ad analyses and a 14-day monitoring preview. No credit card required." : "Sign in and see how your campaigns are doing."}</p>
       {loadError && <div className="alert error" role="alert">{loadError} Check that the backend is running, then try again.</div>}
       {loginError && <div className="alert error" role="alert">{loginError}</div>}
       {loginNotice && <div className="alert success" role="status">{loginNotice}</div>}
       {route.page === "delete-account" && <div className="alert" role="status">Sign in to the account you requested to delete. If you use Google, reopen the link in your deletion email after signing in.</div>}
-      {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your account." : "Email registration is currently unavailable. Contact support."}</div>}
+      {authMode === "signup" && !emailSignupEnabled && <div className="alert" role="status">{googleEnabled ? "Email registration is currently unavailable. Continue with Google to create your account." : <>Email registration is currently unavailable. <SupportLink>Contact support</SupportLink>.</>}</div>}
       {authMode === "signup" && <p className="signup-policies">By creating an account, including with Google, you agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms</a>. Read our <a href="/privacy.html" target="_blank" rel="noopener">Privacy notice</a> and <a href="/refunds.html" target="_blank" rel="noopener">Refunds &amp; cancellation policy</a>.</p>}
       {googleEnabled && <>
         <Button type="button" className="google-button" onClick={startGoogleAuth}>
@@ -587,7 +573,7 @@ function App() {
       {authMode === "signin" && canResendVerification && <Button type="button" className="resend-verification" disabled={loginBusy || !authEmail.trim()} onClick={resendVerification}>Resend verification email</Button>}
       {authMode === "signin" && <p className="forgot-password-link"><a className="text-link" href="#/forgot-password">Forgot password?</a></p>}
       <p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to Click Cohere?"} <a className="text-button" href={authMode === "signup" ? "#/login" : "#/signup"} onClick={() => setLoginError("")}>{authMode === "signup" ? "Sign in" : "Create an account"}</a></p>
-    </section><p className="login-form-foot">Click Cohere · Campaign assurance, made clear.</p></div></main>;
+    </section><p className="login-form-foot">Need help? <SupportLink /></p></div></main>;
   }
   if (route.page === "login" || route.page === "signup") return <main className="center-state"><div className="spinner" /><p>Opening your account…</p></main>;
   if (!data) return <main className="center-state"><div className="spinner" /><p>Loading your campaigns…</p>{loadError && <p role="alert">{loadError} <button className="text-button" onClick={reload}>Try again</button></p>}</main>;
@@ -614,7 +600,7 @@ function App() {
         <NavItem id="overview" active={activeNav === "overview"} icon="overview" label="Overview" />
         <NavItem id="campaigns" active={activeNav === "campaigns"} icon="campaigns" label="Campaigns" count={data.campaigns.length} />
         <NavItem id="site-watch" active={activeNav === "site-watch"} icon="watch" label="Campaign watch" count={data.campaigns.filter((item) => item.monitoringEnabled).length} />
-        <NavItem id="incidents" active={activeNav === "incidents"} icon="warning" label="Incident report" />
+        <NavItem id="incidents" active={activeNav === "incidents"} icon="warning" label="Incidents & warnings" />
         <NavItem id="billing" active={activeNav === "billing"} icon="shield" label="Plan & usage" />
         <NavItem id="settings" active={activeNav === "settings"} icon="settings" label="Settings" />
       </nav>
@@ -628,12 +614,12 @@ function App() {
     </aside>
     <main className="main-area">
       <header className="topbar">
-        <div className="breadcrumbs"><Icon name={activeNav === "site-watch" ? "watch" : activeNav === "incidents" ? "warning" : activeNav} size={17} /><span>Click Cohere</span><Icon name="chevron" size={12} /><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page === "incidents" ? "Incident report" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
+        <div className="breadcrumbs"><Icon name={activeNav === "site-watch" ? "watch" : activeNav === "incidents" ? "warning" : activeNav} size={17} /><span>Click Cohere</span><Icon name="chevron" size={12} /><strong>{route.page === "report" ? "QA report" : route.page === "site-watch" ? "Campaign watch" : route.page === "incidents" ? "Incidents & warnings" : route.page[0].toUpperCase() + route.page.slice(1)}</strong></div>
         <div className="topbar-right"><span className="app-date"><Icon name="calendar" size={15} />{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date())}</span><Status value={connected ? "CONNECTED" : "UNKNOWN"} label={connected ? "Meta connected" : "Meta disconnected"} /><button className="icon-button mobile-signout" title="Sign out" aria-label="Sign out" onClick={logout} disabled={busy === "logout"}><Icon name="logout" size={17} /></button></div>
       </header>
       <div className={`page-content page-${route.page}`} id="main-content" tabIndex="-1">
         <QaNotifications runs={qaChecks.runs} route={route} onDismiss={qaChecks.dismiss} />
-        {!connection && <div className="alert connection-alert" role="status"><div><strong>Meta account disconnected</strong><span>Connect Meta to import real campaigns and run prelaunch QA.</span></div><Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
+        {!connection && <div className="alert connection-alert" role="status"><div><strong>Meta account disconnected</strong><span>Connect Meta to import real campaigns and run prelaunch QA.</span><MetaAccessNotice compact /></div><Button kind="primary" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
         <BillingNotice billing={data.billing} />
         <MetaConnectionNotice meta={data.meta} />
         {route.metaError === "denied" && <div className="alert" role="status">Meta authorization was not completed. Choose Reconnect when you are ready to grant access.</div>}
@@ -644,11 +630,11 @@ function App() {
         {route.page === "overview" && <Overview data={campaignData} busy={busy} runQa={runQa} syncMeta={syncMeta} />}
         {route.page === "campaigns" && <Campaigns data={campaignData} busy={busy} runQa={runQa} monitorCampaign={monitorCampaign} syncMeta={syncMeta} selectMetaAccounts={saveMetaAccounts} />}
         {route.page === "report" && <QaReport campaignId={route.id} refreshKey={`${reportRun?.id}:${reportRun?.status}:${trackedReportRun?.id}:${trackedReportRun?.status}:${connection?.lastSyncAt}`} trackedRun={trackedReportRun} trackRun={qaChecks.track} runQa={runQa} busy={busy} meta={data.meta} syncMeta={syncMeta} />}
-        {route.page === "site-watch" && <SiteWatch data={data} selectedCampaignId={route.campaignId} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
-        {route.page === "incidents" && <IncidentReport data={data} route={route} busy={busy} actOnIncident={actOnIncident} />}
+        {route.page === "site-watch" && <SiteWatch request={request} data={data} selectedCampaignId={route.campaignId} busy={busy} checkCampaign={checkCampaign} monitorCampaign={monitorCampaign} actOnIncident={actOnIncident} />}
+        {route.page === "incidents" && <IncidentReport request={request} data={data} route={route} busy={busy} actOnIncident={actOnIncident} />}
         {route.page === "settings" && <Settings data={data} account={user} onSignedOut={accountSignedOut} busy={busy} syncMeta={syncMeta} disconnectMeta={disconnectMeta} savePreferences={savePreferences} saveAutomaticPausing={saveAutomaticPausing} />}
       </div>
-      <footer className="app-footer"><span>Click Cohere <span aria-hidden="true">/</span> Campaign assurance</span><span><Icon name="shield" size={13} /> Your campaigns. A clearer picture.</span></footer>
+      <footer className="app-footer"><span>Click Cohere <span aria-hidden="true">/</span> Campaign assurance</span><nav aria-label="Support"><a href="/support.html" target="_blank" rel="noopener">Support</a><SupportLink /></nav></footer>
       {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast("")} aria-label="Dismiss notification">×</button></div>}
     </main>
     {incidentDecision && <IncidentDecisionDialog incident={incidentDecision} campaignName={data.campaigns.find((item) => item.campaign.id === incidentDecision.campaignId)?.campaign.name} onCancel={() => setIncidentDecision(null)} onConfirm={() => {
@@ -672,14 +658,13 @@ function IncidentDecisionDialog({ incident, campaignName, onCancel, onConfirm })
   return <dialog ref={dialog} className="incident-decision-dialog" aria-labelledby="incident-decision-title" aria-describedby="incident-decision-description" onCancel={(event) => { event.preventDefault(); onCancel(); }} onClick={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
     <div className="incident-decision-content">
       <span className="eyebrow">CAMPAIGN MONITORING</span>
-      <h2 id="incident-decision-title">Mark {incidentTypeLabel(incident.type).toLowerCase()} intentional?</h2>
+      <h2 id="incident-decision-title">Accept this warning?</h2>
       <div id="incident-decision-description">
-        <p>This applies to all current and future incidents of this type for {scope}{incident.campaignId ? ", across all its destination pages" : ""}.</p>
-        <p><strong>It stays intentional until someone explicitly reverts it.</strong> Future checks will still record what they observe, but incidents of this type will not open alerts.</p>
-        {incident.campaignId && incident.type === "availability" && <p className="incident-decision-warning">Automatic campaign pausing for page availability failures will also be disabled until this setting is reverted.</p>}
-        <p>Use <strong>Revert intentional</strong> in the campaign summary or incident report to restore normal monitoring.</p>
+        <p><strong>{issueTitle(incident)}</strong> for {scope}.</p>
+        <p>We will keep checking, but stop alerting you about this kind of warning until you restore alerts from History.</p>
+        <p>Other warnings and confirmed outage incidents stay active.</p>
       </div>
-      <div className="incident-decision-actions"><Button autoFocus onClick={onCancel}>Cancel</Button><Button kind="primary" onClick={onConfirm}>Mark intentional</Button></div>
+      <div className="incident-decision-actions"><Button autoFocus onClick={onCancel}>Cancel</Button><Button kind="primary" onClick={onConfirm}>Accept warning</Button></div>
     </div>
   </dialog>;
 }
@@ -713,7 +698,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
   });
   const monitored = campaigns.filter((item) => item.monitoringEnabled);
   const openIncidents = incidents.filter((incident) => incident.status === "OPEN").sort((a, b) =>
-    Number(b.type === "availability") - Number(a.type === "availability") ||
+    Number(issueCategory(b) === "INCIDENT") - Number(issueCategory(a) === "INCIDENT") ||
     (Date.parse(b.lastSeenAt || b.createdAt) || 0) - (Date.parse(a.lastSeenAt || a.createdAt) || 0)
   );
   const campaignById = new Map(campaigns.map((item) => [item.campaign.id, item]));
@@ -750,7 +735,7 @@ function Overview({ data, busy, runQa, syncMeta }) {
           <circle className="overview-signal-node" cx="299" cy="66" r="4" /><circle className="overview-signal-orbit" cx="242" cy="9" r="3" />
         </svg>
       </div>
-      {!connected && <Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button>}
+      {!connected && <div className="meta-connect-action"><MetaAccessNotice compact /><Button kind="primary" icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Connect Meta Ads</Button></div>}
     </div>
     <CampaignSyncReminder connection={meta.connection} busy={busy} syncMeta={syncMeta} />
 
@@ -758,14 +743,14 @@ function Overview({ data, busy, runQa, syncMeta }) {
       <OverviewMetric label="Campaigns" value={campaigns.length} note={selectedAccounts ? `Across ${selectedAccounts} ad account${selectedAccounts === 1 ? "" : "s"}` : "Your imported campaigns"} icon="campaigns" tone="total" href="#/campaigns" />
       <OverviewMetric label="To review" value={needsReview.length} note="Before your next launch" icon="shield" tone={needsReview.length ? "review" : ""} onClick={() => selectFilter("qa", true)} />
       <OverviewMetric label="Watches enabled" value={monitored.length} note={data.billing.monitoringActive ? `${data.billing.monitoringIntervalMinutes}-minute schedule` : "Coverage paused ? review your plan"} icon="watch" tone="watch" href="#/site-watch" />
-      <OverviewMetric label="Open incidents" value={openIncidents.length} note={openIncidents.length ? "Landing-page issues to review" : "No open issues"} icon="warning" tone={openIncidents.length ? "incident" : ""} onClick={() => selectFilter("incident", true)} />
+      <OverviewMetric label="Open issues" value={openIncidents.length} note={openIncidents.length ? "Incidents and warnings to review" : "No open issues"} icon="warning" tone={openIncidents.some((issue) => issueCategory(issue) === "INCIDENT") ? "incident" : openIncidents.length ? "review" : ""} onClick={() => selectFilter("incident", true)} />
     </section>
 
     <div className="overview-content">
       <section className="overview-panel overview-attention" ref={attention} tabIndex="-1" id="overview-attention" aria-labelledby="overview-attention-title">
-        <div className="overview-panel-heading"><div><h2 id="overview-attention-title">Needs attention<span className="overview-count">{allActions.length}</span></h2><p>Open incidents first. Campaign checks next.</p></div></div>
+        <div className="overview-panel-heading"><div><h2 id="overview-attention-title">Needs attention<span className="overview-count">{allActions.length}</span></h2><p>Incidents first, then warnings and campaign checks.</p></div></div>
         <div className="overview-filters" role="group" aria-label="Filter actions">
-          {[{ id: "all", label: "All", count: allActions.length }, { id: "incident", label: "Incidents", count: openIncidents.length }, { id: "qa", label: "QA checks", count: needsReview.length }].map((option) =>
+          {[{ id: "all", label: "All", count: allActions.length }, { id: "incident", label: "Incidents & warnings", count: openIncidents.length }, { id: "qa", label: "QA checks", count: needsReview.length }].map((option) =>
             <button key={option.id} type="button" className={`overview-filter ${filter === option.id ? "is-active" : ""}`} aria-pressed={filter === option.id} aria-controls="overview-action-list" onClick={() => selectFilter(option.id)}>{option.label}<span>{option.count}</span></button>
           )}
         </div>
@@ -773,16 +758,16 @@ function Overview({ data, busy, runQa, syncMeta }) {
           {actions.length ? <ul className="overview-action-list">{actions.slice(0, visibleCount).map((action) => action.type === "incident"
             ? <OverviewIncidentRow key={action.id} incident={action.incident} campaignName={campaignById.get(action.incident.campaignId)?.campaign.name} />
             : <OverviewQaRow key={action.id} item={action.item} busy={busy} runQa={runQa} />
-          )}</ul> : <div className="overview-empty"><span><Icon name={campaigns.length ? "check" : "campaigns"} size={24} /></span><h3>{!campaigns.length && !allActions.length ? "Start with your first campaign" : filter === "incident" ? "No open incidents" : filter === "qa" ? "No campaigns need review" : "You're all caught up"}</h3><p>{!campaigns.length && !allActions.length ? connected ? "Sync your Meta campaigns to run your first check." : "Connect Meta Ads to bring your campaigns into view." : filter === "incident" ? "Any new landing-page issues will appear here." : "Your next action will appear here when it's needed."}</p></div>}
+          )}</ul> : <div className="overview-empty"><span><Icon name={campaigns.length ? "check" : "campaigns"} size={24} /></span><h3>{!campaigns.length && !allActions.length ? "Start with your first campaign" : filter === "incident" ? "No open issues" : filter === "qa" ? "No campaigns need review" : "You're all caught up"}</h3><p>{!campaigns.length && !allActions.length ? connected ? "Sync your Meta campaigns to run your first check." : "Connect Meta Ads to bring your campaigns into view." : filter === "incident" ? "Any new landing-page issues will appear here." : "Your next action will appear here when it's needed."}</p></div>}
         </div>
-        {actions.length > 0 && <div className="overview-panel-footer"><span aria-live="polite">Showing {Math.min(visibleCount, actions.length)} of {actions.length}</span>{actions.length > visibleCount ? <button type="button" className="text-link overview-show-more" onClick={() => setVisibleCount((count) => count + 4)}>Show more <Icon name="chevron" size={14} /></button> : <a className="text-link" href={filter === "incident" ? incidentReportHref({ status: "OPEN" }) : "#/campaigns"}>{filter === "incident" ? "Incident report" : "All campaigns"}<Icon name="arrow" size={14} /></a>}</div>}
+        {actions.length > 0 && <div className="overview-panel-footer"><span aria-live="polite">Showing {Math.min(visibleCount, actions.length)} of {actions.length}</span>{actions.length > visibleCount ? <button type="button" className="text-link overview-show-more" onClick={() => setVisibleCount((count) => count + 4)}>Show more <Icon name="chevron" size={14} /></button> : <a className="text-link" href={filter === "incident" ? incidentReportHref({ status: "OPEN" }) : "#/campaigns"}>{filter === "incident" ? "Incidents & warnings" : "All campaigns"}<Icon name="arrow" size={14} /></a>}</div>}
       </section>
 
       <section className="overview-panel overview-monitoring" aria-labelledby="overview-watch-title">
         <div className="overview-panel-heading"><div><h2 id="overview-watch-title">Campaign watch</h2><p>Landing pages, checked around the clock.</p></div><span className={`overview-live ${monitored.length ? "is-live" : ""}`}><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "Live" : "Inactive"}</span></div>
         <div className="overview-coverage"><div><span>Monitoring coverage</span><strong>{coverage}<span>%</span></strong></div><div className="overview-coverage-track" role="meter" aria-label="Campaigns on watch" aria-valuenow={monitored.length} aria-valuemin={0} aria-valuemax={campaigns.length || 1} aria-valuetext={`${monitored.length} of ${campaigns.length} campaigns on watch`}><span style={{ width: `${coverage}%` }} /></div><p><strong>{monitored.length}</strong> of {campaigns.length} campaigns on watch</p></div>
         {monitored.length ? <ul className="overview-watch-list">{watchPreview.map((item) => <OverviewWatchRow key={item.campaign.id} item={item} incident={incidentsByCampaign.get(item.campaign.id)} />)}</ul> : <div className="overview-empty overview-watch-empty"><span><Icon name="watch" size={24} /></span><h3>Start your first watch</h3><p>Monitor a campaign to check its landing pages on your plan's schedule.</p><a className="text-link" href="#/campaigns">Choose campaigns <Icon name="arrow" size={15} /></a></div>}
-        <div className="overview-panel-footer"><span><Icon name="clock" size={13} /> Every 60 seconds</span><a className="text-link" href="#/site-watch">{monitored.length > watchPreview.length ? `View all ${monitored.length}` : "Manage watch"}<Icon name="arrow" size={14} /></a></div>
+        <div className="overview-panel-footer"><span><Icon name="clock" size={13} /> {data.billing.monitoringActive ? `Every ${data.billing.monitoringIntervalMinutes} minutes` : "Coverage paused"}</span><a className="text-link" href="#/site-watch">{monitored.length > watchPreview.length ? `View all ${monitored.length}` : "Manage watch"}<Icon name="arrow" size={14} /></a></div>
       </section>
     </div>
 
@@ -804,15 +789,16 @@ function OverviewQaRow({ item, busy, runQa }) {
 }
 
 function OverviewIncidentRow({ incident, campaignName }) {
-  const href = incidentReportHref({ campaignId: incident.campaignId || "", type: incidentType(incident.type), status: "OPEN" });
-  return <li className="overview-action-row overview-incident-row"><span className="overview-avatar overview-incident-avatar"><Icon name="warning" size={18} /></span><div className="overview-row-copy"><a href={href}>{campaignName || "Landing page issue"}</a><div className="overview-row-meta"><span>{incidentTypeLabel(incident.type)}</span><span className="overview-incident-label">Open incident</span></div></div><a className="button overview-row-action overview-review-issue" href={href} aria-label={`Review ${incidentTypeLabel(incident.type).toLowerCase()}${campaignName ? ` for ${campaignName}` : ""}`}>Review issue<Icon name="arrow" size={14} /></a></li>;
+  const href = incidentReportHref({ campaignId: incident.campaignId || "", category: issueCategory(incident), status: "OPEN" });
+  return <li className="overview-action-row overview-incident-row"><span className="overview-avatar overview-incident-avatar"><Icon name="warning" size={18} /></span><div className="overview-row-copy"><a href={href}>{campaignName || "Landing page issue"}</a><div className="overview-row-meta"><span>{issueTitle(incident)}</span><span className={`overview-incident-label ${issueCategory(incident) === "WARNING" ? "is-warning" : ""}`}>{issueCategory(incident) === "INCIDENT" ? "Incident" : "Warning · alerts only"}</span></div></div><a className="button overview-row-action overview-review-issue" href={href} aria-label={`Review ${incidentTypeLabel(incident.type).toLowerCase()}${campaignName ? ` for ${campaignName}` : ""}`}>Review issue<Icon name="arrow" size={14} /></a></li>;
 }
 
 function OverviewWatchRow({ item, incident }) {
   const checked = Boolean(item.lastMonitoringAt);
   const checkedToday = checked && new Date(item.lastMonitoringAt).toDateString() === new Date().toDateString();
+  const issueClass = incident ? issueCategory(incident) === "INCIDENT" ? "has-incident" : "has-warning" : "";
   const href = incident ? incidentReportHref({ campaignId: item.campaign.id, status: "OPEN" }) : `#/site-watch?campaign=${encodeURIComponent(item.campaign.id)}`;
-  return <li><a className="overview-watch-row" href={href}><span className={`overview-watch-icon ${incident ? "has-incident" : checked ? "is-checked" : ""}`}><Icon name={incident ? "warning" : checked ? "check" : "clock"} size={17} /></span><span className="overview-watch-copy"><strong>{item.campaign.name}</strong><small className={incident ? "has-incident" : ""}>{incident ? "Needs attention" : checked ? <>Last checked <time dateTime={item.lastMonitoringAt}>{formatDate(item.lastMonitoringAt, { dateStyle: checkedToday ? undefined : "medium", timeStyle: "short" })}</time></> : "Waiting for first check"}</small></span><Icon name="chevron" size={14} /></a></li>;
+  return <li><a className="overview-watch-row" href={href}><span className={`overview-watch-icon ${incident ? issueClass : checked ? "is-checked" : ""}`}><Icon name={incident ? "warning" : checked ? "check" : "clock"} size={17} /></span><span className="overview-watch-copy"><strong>{item.campaign.name}</strong><small className={issueClass}>{incident ? issueCategory(incident) === "INCIDENT" ? "Incident detected" : "Warning · alerts only" : checked ? <>Last checked <time dateTime={item.lastMonitoringAt}>{formatDate(item.lastMonitoringAt, { dateStyle: checkedToday ? undefined : "medium", timeStyle: "short" })}</time></> : "Waiting for first check"}</small></span><Icon name="chevron" size={14} /></a></li>;
 }
 
 function campaignObjective(value) {
@@ -1123,7 +1109,7 @@ function reportValueLines(result, side) {
     return value?.detectedText ? [`Detected notice: ${value.detectedText}`] : ["No recognized out-of-stock phrase found in captured page text."];
   }
   if (type === "server_response_time") {
-    if (side === "expected") return [`Server response should be within ${Number(value?.thresholdMs ?? 3000).toLocaleString()} ms.`];
+    if (side === "expected") return [`Server response should be within ${Number(value?.thresholdMs ?? 10000).toLocaleString()} ms.`];
     return value?.responseTimeMs != null
       ? [`Measured server response: ${Number(value.responseTimeMs).toLocaleString()} ms`]
       : ["Server response time could not be measured."];
@@ -1277,161 +1263,6 @@ function Finding({ result, evidence }) {
   </article>;
 }
 
-function SiteWatch({ data, selectedCampaignId, busy, checkCampaign, monitorCampaign, actOnIncident }) {
-  const { campaigns = [], incidents = [] } = data;
-  const monitored = campaigns.filter((item) => item.monitoringEnabled);
-  const [selectedId, setSelectedId] = useState(selectedCampaignId || "");
-  const [details, setDetails] = useState(null);
-  const [detailError, setDetailError] = useState("");
-  const selected = monitored.find((item) => item.campaign.id === selectedId) || null;
-  const incidentGroups = groupIncidents(incidents.filter((incident) => incident.campaignId === selected?.campaign.id));
-  useEffect(() => {
-    if (selectedCampaignId) setSelectedId(selectedCampaignId);
-  }, [selectedCampaignId]);
-  useEffect(() => {
-    if (!monitored.length) { setSelectedId(""); return; }
-    if (!monitored.some((item) => item.campaign.id === selectedId)) setSelectedId(monitored[0].campaign.id);
-  }, [campaigns, selectedId]);
-  useEffect(() => {
-    if (!selected) { setDetails(null); return; }
-    let active = true;
-    setDetails(null);
-    setDetailError("");
-    request("/api/campaigns/" + selected.campaign.id + "/monitoring").then((result) => {
-      if (active) setDetails(result);
-    }).catch((error) => { if (active) setDetailError(error.message); });
-    return () => { active = false; };
-  }, [selected?.campaign.id, selected?.lastMonitoringAt, campaigns.length]);
-  const activeIncidents = incidents.filter((incident) => incident.status === "OPEN");
-  return <>
-    <PageHeading eyebrow="CONTINUOUS MONITORING" title="Always on watch" action={<div className="watch-heading-actions"><span className="monitoring-label"><span className={`signal-dot ${monitored.length ? "online" : ""}`} />{monitored.length ? "Checks every 60 seconds" : "No active watches"}</span><a className="button secondary incident-report-link" href={incidentReportHref()}>Full incident report <Icon name="arrow" size={15} /></a></div>}>Keep a close eye on the pages your campaigns send people to.</PageHeading>
-    <div className="metrics-grid">
-      <Metric label="Campaigns monitored" value={data.dashboard?.monitoredCampaigns ?? monitored.length} note="The campaign is refreshed before every check" tone="green" />
-      <Metric label="Active incidents" value={activeIncidents.length} note="Changes or availability issues needing review" tone={activeIncidents.length ? "coral" : ""} />
-      <Metric label="Last monitoring run" value={data.dashboard?.lastMonitoringRun ? formatDate(data.dashboard.lastMonitoringRun) : "Not yet"} note="Latest recorded campaign check" />
-    </div>
-    <div className="watch-layout">
-      <section className="panel sites-panel"><div className="panel-heading"><div><h2>Monitored campaigns</h2><p>{monitored.length} active campaign{monitored.length === 1 ? "" : "s"}</p></div></div>
-        {monitored.length === 0 ? <Empty title="No campaigns monitored">Open Campaigns and choose Monitor campaign. Its destinations will be refreshed from Meta at every check.</Empty> : <div className="site-list">{monitored.map((item) => {
-          const campaign = item.campaign;
-          const open = incidents.find((incident) => incident.campaignId === campaign.id && incident.status === "OPEN");
-          return <button key={campaign.id} className={"site-option " + (selectedId === campaign.id ? "selected" : "")} onClick={() => setSelectedId(campaign.id)} aria-pressed={selectedId === campaign.id}>
-            <span className={`watch-state ${open ? "is-incident" : "is-ok"}`}><Icon name={open ? "warning" : "globe"} size={18} /></span>
-            <span className="site-option-main"><strong>{campaign.name}</strong><small>{campaignObjective(campaign.objective)} · {item.monitoringDestinationCount} destination{item.monitoringDestinationCount === 1 ? "" : "s"}</small></span><Icon name="chevron" size={14} />
-          </button>;
-        })}</div>}
-      </section>
-      <section className="panel site-detail-panel">
-        {!selected ? <Empty title="Choose a campaign">Select a monitored campaign to inspect its latest Meta destinations and check history.</Empty> : <>
-          <div className="site-detail-head"><div><div className="eyebrow">MONITORED CAMPAIGN</div><h2>{selected.campaign.name}</h2><p>{campaignObjective(selected.campaign.objective)} · {data.billing.monitoringActive ? `Every ${data.billing.monitoringIntervalMinutes} minutes` : "Coverage paused"}</p></div><Status value={!data.billing.monitoringActive ? "UNKNOWN" : data.billing.monitoredPages.blocked.length || data.billing.adAccounts.used > data.billing.adAccounts.limit ? "WARNING" : selected.lastMonitoringAt ? "PASS" : "UNKNOWN"} label={!data.billing.monitoringActive ? "Coverage paused" : data.billing.monitoredPages.blocked.length || data.billing.adAccounts.used > data.billing.adAccounts.limit ? "Review coverage" : selected.lastMonitoringAt ? "Watch enabled" : "Waiting for first check"} /></div>
-          <div className="site-timing"><div><span>Last check</span><strong>{formatDate(selected.lastMonitoringAt)}</strong></div><div><span>Next scheduled</span><strong>{formatDate(selected.nextMonitoringAt)}</strong></div><div><span>Current destinations</span><strong>{selected.monitoringDestinationCount ?? 0}</strong></div></div>
-          <div className="site-actions"><Button kind="primary" icon="refresh" disabled={busy === "campaign-monitor:" + selected.campaign.id} onClick={() => checkCampaign(selected.campaign.id)}>{busy === "campaign-monitor:" + selected.campaign.id ? "Checking campaign…" : "Check now"}</Button><Button icon="watch" disabled={busy === "monitor:" + selected.campaign.id} onClick={() => monitorCampaign(selected.campaign.id, false)}>Pause watch</Button></div>
-          {detailError && <div className="alert error" role="alert">{detailError}</div>}
-          {details && <section className="history-section"><div className="section-heading"><h3>Current ad destinations</h3><span>Refreshed from Meta for each check</span></div>
-            {details.destinations.length === 0 ? <Empty title="No current ad destinations">The latest Meta campaign data contains no destination URL to inspect.</Empty> : <div className="history-list">{details.destinations.map((destination) => {
-              const latest = destination.latestSnapshot;
-              const safeUrl = safeExternalUrl(destination.url);
-              return <div key={destination.url} className="history-row destination-history-row"><span className={"history-mark " + (latest ? statusTone(latest.status) : "")} aria-hidden="true">{latest?.status === "PASS" ? "OK" : latest ? "!" : "-"}</span><div className="history-copy"><strong>{safeUrl ? <a href={safeUrl} target="_blank" rel="noreferrer">{destination.url}</a> : destination.url}</strong><small>{destination.ads?.length ? "Used by: " + destination.ads.join(", ") : "Current campaign destination"}</small><small>{latest ? latest.status + " | HTTP " + (latest.httpStatus || "?") + (latest.pageTitle ? " | " + latest.pageTitle : "") : "Not checked yet"}{latest?.errorCode ? " | " + latest.errorCode : ""}</small></div><time>{destination.lastCheckedAt ? formatDate(destination.lastCheckedAt) : (destination.snapshotCount || 0) + " checks"}</time></div>;
-            })}</div>}
-          </section>}
-          <section className="history-section"><div className="section-heading incident-section-heading"><h3>Campaign incidents <span className="count-label">{incidentGroups.length} type{incidentGroups.length === 1 ? "" : "s"}</span></h3><a className="text-link" href={incidentReportHref({ campaignId: selected.campaign.id })}>View full report <Icon name="arrow" size={14} /></a></div>
-            {incidentGroups.length === 0 ? <p className="muted-copy">No incidents have been recorded for this campaign.</p> : <><p className="incident-summary-note">One summary per incident type. Intentional settings apply across this campaign until reverted.</p><div className="incident-list">{incidentGroups.map((group) => <IncidentSummary key={group.type} group={group} campaignId={selected.campaign.id} actOnIncident={actOnIncident} busy={busy} />)}</div></>}
-          </section>
-        </>}
-      </section>
-    </div>
-  </>;
-}
-
-function IncidentValues({ incident }) {
-  return <div className="incident-values"><span>Before: {incidentValueText(incident.oldValue)}</span><span>Observed: {incidentValueText(incident.newValue)}</span></div>;
-}
-
-function IncidentActions({ incident, actOnIncident, busy }) {
-  const intentional = incident.status === "INTENTIONAL";
-  return <span className="incident-buttons">
-    <Button disabled={Boolean(busy)} onClick={() => actOnIncident(incident, "recheck")}>Recheck</Button>
-    <Button disabled={Boolean(busy)} onClick={() => actOnIncident(incident, intentional ? "revert-intentional" : "mark-intentional")}>{intentional ? "Revert intentional" : "Mark intentional"}</Button>
-  </span>;
-}
-
-function IncidentSummary({ group, campaignId, actOnIncident, busy }) {
-  const incident = group.representative;
-  const url = safeExternalUrl(incident.evidenceJson?.url);
-  return <article className="incident-card incident-summary">
-    <div className="incident-card-head"><strong>{incidentTypeLabel(group.type)}</strong><Status value={group.openCount ? "OPEN" : group.intentionalCount ? "INTENTIONAL" : group.latest.status} label={group.openCount ? `${group.openCount} open` : undefined} /></div>
-    <p>{group.totalCount} incident{group.totalCount === 1 ? "" : "s"} recorded{group.pageCount ? ` · ${group.pageCount} ${group.openCount ? "affected" : "previously affected"} page${group.pageCount === 1 ? "" : "s"}` : ""}</p>
-    <IncidentValues incident={incident} />
-    {url && <a className="incident-page-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
-    {incident.status === "RESOLVED" && incident.resolutionNote && <p className="incident-resolution-note">{incident.resolutionNote}</p>}
-    {group.intentionalCount > 0 && !group.openCount && <p className="incident-intentional-note">Intentional for this campaign until reverted. Future incidents of this type will not open alerts.</p>}
-    <div className="incident-foot"><span>{group.openCount ? "Latest open observation" : "Last seen"}: {formatDate(incident.lastSeenAt)}</span><a className="text-link" href={incidentReportHref({ campaignId, type: group.type })}>Review incidents <Icon name="arrow" size={14} /></a><IncidentActions incident={incident} actOnIncident={actOnIncident} busy={busy} /></div>
-  </article>;
-}
-
-function IncidentReport({ data, route, busy, actOnIncident }) {
-  const { campaigns = [], incidents = [] } = data;
-  const campaignId = route.campaignId || "";
-  const type = route.type || "";
-  const status = route.status || "";
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  const [report, setReport] = useState({ path: "", loading: true, incidents: [], error: "" });
-  const params = new URLSearchParams();
-  if (campaignId) params.set("campaignId", campaignId);
-  if (type) params.set("type", type);
-  if (status) params.set("status", status);
-  const path = `/api/incidents/report${params.size ? `?${params}` : ""}`;
-  useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-    setReport({ path, loading: true, incidents: [], error: "" });
-    request(path, { signal: controller.signal }).then((records) => {
-      if (active) setReport({ path, loading: false, incidents: records.slice(0, INCIDENT_REPORT_LIMIT), error: "" });
-    }).catch((error) => {
-      if (active) setReport({ path, loading: false, incidents: [], error: error.message });
-    });
-    return () => { active = false; controller.abort(); };
-  }, [path, incidents, refreshVersion]);
-  const loading = report.path !== path || report.loading;
-  const campaignNames = new Map(campaigns.map((item) => [item.campaign.id, item.campaign.name]));
-  for (const incident of incidents) {
-    if (incident.campaignId && !campaignNames.has(incident.campaignId)) campaignNames.set(incident.campaignId, `Campaign ${incident.campaignId.slice(0, 8)}`);
-  }
-  if (campaignId && !campaignNames.has(campaignId)) campaignNames.set(campaignId, `Campaign ${campaignId.slice(0, 8)}`);
-  const types = new Set([...Object.keys(INCIDENT_TYPES), ...incidents.map((incident) => incidentType(incident.type))]);
-  if (type) types.add(type);
-  const changeFilter = (name, value) => {
-    window.location.hash = incidentReportHref({ campaignId, type, status, [name]: value });
-  };
-  return <>
-    <PageHeading eyebrow="MONITORING HISTORY" title="Incident report" action={<a className="button secondary incident-report-link" href="#/site-watch"><Icon name="watch" size={16} />Campaign watch</a>}>Review up to {INCIDENT_REPORT_LIMIT} recent incidents, including open issues, recoveries, and intentional changes.</PageHeading>
-    <section className="panel incident-report-panel">
-      <div className="panel-heading"><div><h2>Recent incidents</h2><p>Filters search your full history. Up to {INCIDENT_REPORT_LIMIT} matches are shown, most recently seen first.</p></div><Button icon="refresh" disabled={loading || Boolean(busy)} onClick={() => setRefreshVersion((version) => version + 1)}>Refresh</Button></div>
-      <div className="incident-report-filters">
-        <div className="incident-report-filter"><label htmlFor="incident-campaign">Campaign</label><select id="incident-campaign" value={campaignId} onChange={(event) => changeFilter("campaignId", event.target.value)}><option value="">All campaigns and pages</option>{[...campaignNames].map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></div>
-        <div className="incident-report-filter"><label htmlFor="incident-type">Incident type</label><select id="incident-type" value={type} onChange={(event) => changeFilter("type", event.target.value)}><option value="">All incident types</option>{[...types].map((value) => <option key={value} value={value}>{incidentTypeLabel(value)}</option>)}</select></div>
-        <div className="incident-report-filter"><label htmlFor="incident-status">Status</label><select id="incident-status" value={status} onChange={(event) => changeFilter("status", event.target.value)}><option value="">All statuses</option><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option><option value="INTENTIONAL">Intentional</option><option value="REVERTED">Reverted</option></select></div>
-      </div>
-      <p className="incident-report-caption" role="status">{loading ? "Loading incidents…" : report.error ? "The incident report could not be loaded." : `Showing ${report.incidents.length}${report.incidents.length === INCIDENT_REPORT_LIMIT ? ` most recent` : ""} incident${report.incidents.length === 1 ? "" : "s"}.`}{!loading && (campaignId || type || status) && <a className="text-link" href={incidentReportHref()}>Clear filters</a>}</p>
-      {loading ? <div className="center-state inline"><div className="spinner" /><p>Loading incident details…</p></div> : report.error ? <div className="alert error" role="alert"><span>{report.error}</span><Button onClick={() => setRefreshVersion((version) => version + 1)}>Try again</Button></div> : report.incidents.length === 0 ? <Empty title="No matching incidents">Choose another filter or check back after the next monitoring run.</Empty> : <div className="incident-list">{report.incidents.map((incident) => <IncidentCard key={incident.id} incident={incident} campaignName={incident.campaignId ? campaignNames.get(incident.campaignId) || "Campaign unavailable" : "Standalone page"} actOnIncident={actOnIncident} busy={busy} />)}</div>}
-    </section>
-  </>;
-}
-
-function IncidentCard({ incident, campaignName, actOnIncident, busy }) {
-  const url = safeExternalUrl(incident.evidenceJson?.url);
-  return <article className="incident-card incident-report-card">
-    <div className="incident-card-head"><strong>{incident.title || incidentTypeLabel(incident.type)}</strong><Status value={incident.status} /></div>
-    <p>{campaignName} · {incident.severity || "Severity not specified"}</p>
-    {url && <a className="incident-page-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
-    {incident.type?.startsWith("claim:") && <p>Watched claim: {incident.type.slice(6)}</p>}
-    <IncidentValues incident={incident} />
-    {incident.status === "INTENTIONAL" && <p className="incident-intentional-note">Intentional for this {incident.campaignId ? "campaign" : "page"} until reverted. Applies to all future incidents of this type.</p>}
-    <div className="incident-foot"><span>First seen {formatDate(incident.firstSeenAt)} · Last seen {formatDate(incident.lastSeenAt)}{incident.resolvedAt ? ` · ${incident.status === "INTENTIONAL" ? "Marked intentional" : incident.status === "REVERTED" ? "Reverted" : "Resolved"} ${formatDate(incident.resolvedAt)}` : ""}</span><IncidentActions incident={incident} actOnIncident={actOnIncident} busy={busy} /></div>
-    {incident.resolutionNote && <p className="incident-resolution-note">{incident.resolutionNote}</p>}
-  </article>;
-}
-
 function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, savePreferences, saveAutomaticPausing }) {
   const { meta, campaigns = [], preferences } = data;
   const simulation = preferences.autoPauseSimulation === true;
@@ -1466,6 +1297,7 @@ function Settings({ data, account, onSignedOut, busy, syncMeta, disconnectMeta, 
       <div className="settings-connection"><div><strong>{accounts.length} ad account{accounts.length === 1 ? "" : "s"} available</strong><p>{accounts.filter((account) => account.selected).length} selected for campaign sync</p></div>{meta.connection?.lastSyncAt && <small><Icon name="clock" size={14} /> Last synced {formatDate(meta.connection.lastSyncAt)}</small>}</div>
       {accounts.length > 0 && <details className="connected-accounts"><summary>View connected ad accounts <Icon name="chevron" size={15} /></summary><div className="account-details">{accounts.map((account) => <span key={account.id}><strong>{account.name}{account.selected && <span className="account-selected"><Icon name="check" size={12} /> Selected</span>}</strong><small>{account.externalId} · {account.currency || "Currency unavailable"}</small></span>)}</div></details>}
       {!accounts.length && <p className="muted-copy">{connected ? "Sync your account to discover available campaigns." : "Connect Meta Ads to bring your campaigns into Click Cohere."}</p>}
+      <MetaAccessNotice />
       <div className="settings-actions">{meta.connection ? <>
         <Button icon="refresh" onClick={syncMeta} disabled={!connected || busy === "sync" || busy === "meta-accounts"}>{busy === "sync" ? "Syncing…" : accounts.length ? "Refresh accounts" : "Discover ad accounts"}</Button>
         <Button icon="link" onClick={() => window.location.assign("/api/integrations/meta/connect")}>Reconnect</Button><Button className="destructive-text" onClick={disconnectMeta}>Disconnect</Button>
@@ -1534,7 +1366,7 @@ function AutoPauseBetaDialog({ simulation, pending, error, onCancel, onConfirm }
   </dialog>;
 }
 
-function WebsiteRouter() {
+function WebsiteRouter({ renderedYear }) {
   const [route, setRoute] = useState(routeFromHash);
   useEffect(() => {
     const updateRoute = () => setRoute(routeFromHash());
@@ -1542,7 +1374,7 @@ function WebsiteRouter() {
     return () => window.removeEventListener("hashchange", updateRoute);
   }, []);
   useEffect(() => {
-    const titles = { home: "Click Cohere — Keep the promise behind every click", login: "Log in — Click Cohere", signup: "Create your account — Click Cohere", overview: "Campaign overview — Click Cohere", campaigns: "Your campaigns — Click Cohere", "site-watch": "Campaign watch — Click Cohere", incidents: "Incident report — Click Cohere", settings: "Account settings — Click Cohere", report: "Campaign QA report — Click Cohere" };
+    const titles = { home: "Click Cohere — Keep the promise behind every click", login: "Log in — Click Cohere", signup: "Create your account — Click Cohere", overview: "Campaign overview — Click Cohere", campaigns: "Your campaigns — Click Cohere", "site-watch": "Campaign watch — Click Cohere", incidents: "Incidents & warnings — Click Cohere", settings: "Account settings — Click Cohere", report: "Campaign QA report — Click Cohere" };
     titles.billing = "Plan & usage - Click Cohere";
     titles["forgot-password"] = "Recover your account — Click Cohere";
     titles["reset-password"] = "Reset password — Click Cohere";
@@ -1552,7 +1384,16 @@ function WebsiteRouter() {
     if (anchor) anchor.scrollIntoView();
     else window.scrollTo(0, 0);
   }, [route.page]);
-  return route.page === "home" ? <LandingPage /> : <App />;
+  return route.page === "home" ? <LandingPage year={renderedYear} /> : <App />;
 }
 
-createRoot(document.getElementById("root")).render(<React.StrictMode><WebsiteRouter /><AnalyticsConsent /></React.StrictMode>);
+const rootElement = document.getElementById("root");
+const renderedYear = rootElement.dataset.renderedYear ? Number(rootElement.dataset.renderedYear) : undefined;
+const application = <React.StrictMode><WebsiteRouter renderedYear={renderedYear} /><AnalyticsConsent /></React.StrictMode>;
+// Hash routes still select the existing auth/workspace screens. Hydrate only the
+// public home; an incoming signup, recovery, or protected URL renders its own screen.
+if (rootElement.dataset.prerendered === "home" && routeFromHash().page === "home") {
+  hydrateRoot(rootElement, application);
+} else {
+  createRoot(rootElement).render(application);
+}

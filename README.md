@@ -15,7 +15,9 @@ Vite serves the UI at `http://127.0.0.1:5173` and proxies `/api` requests to the
 
 ## Public website and workspace
 
-The public landing page at `/` renders without backend requests. Its design and final copy are documented in [the landing-page brief](docs/landing-page-brief.md). The interactive product examples use illustrative data.
+The public landing page at `/` renders without backend requests apart from the existing optional analytics configuration. Its design, verified billing/permission copy, and production checks are documented in [the landing-page brief](docs/landing-page-brief.md). It includes the supplied recorded product walkthrough, captions, a transcript, and chapter links.
+
+`npm run build` builds Vite assets and pre-renders the same React landing component into the initial HTML, including pricing and FAQ answers. `npm run preview -- --port 4173` serves that production build for local review. Public home routes hydrate; existing authentication and workspace hash routes still render their respective screens. The Docker/release source must include `scripts/` for the pre-render step, plus `public/` for crawl and video files.
 
 | URL | Screen |
 | --- | --- |
